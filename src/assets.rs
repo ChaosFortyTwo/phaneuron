@@ -6,6 +6,8 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 pub struct Assets {
+    /// Folder that holds the executable, `assets/`, `mods/` and `saves/`.
+    pub base: PathBuf,
     roots: Vec<PathBuf>,
 }
 
@@ -31,12 +33,12 @@ impl Assets {
             mods.sort();
             roots.extend(mods);
         }
-        Assets { roots }
+        Assets { base, roots }
     }
 
     #[cfg(test)]
     pub fn with_roots(roots: Vec<PathBuf>) -> Self {
-        Assets { roots }
+        Assets { base: PathBuf::from("."), roots }
     }
 
     pub fn roots(&self) -> &[PathBuf] {

@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 
 use crate::blocks::Atlas;
-use crate::world::{ChunkKey, World, CH, CW};
+use crate::world::{ChunkKey, World, BLOCK, CH, CW};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -54,7 +54,8 @@ pub fn build(world: &World, atlas: &Atlas, key: ChunkKey) -> MeshData {
                 let (wx, wy, wz) = (key.0 * CW as i32 + x as i32, y as i32, key.1 * CW as i32 + z as i32);
 
                 if let Some(model) = &block.model {
-                    push_model(&mut mesh, model, atlas, block.tiles[1], Vec3::new(wx as f32 + 0.5, wy as f32, wz as f32 + 0.5));
+                    let origin = Vec3::new(wx as f32 + 0.5, wy as f32, wz as f32 + 0.5) * BLOCK;
+                    push_model(&mut mesh, model, atlas, block.tiles[1], origin);
                     continue;
                 }
 
@@ -67,7 +68,7 @@ pub fn build(world: &World, atlas: &Atlas, key: ChunkKey) -> MeshData {
                     let base = mesh.vertices.len() as u32;
                     for (c, cuv) in corners.iter().zip(CORNER_UV) {
                         mesh.vertices.push(Vertex {
-                            pos: [wx as f32 + c[0], wy as f32 + c[1], wz as f32 + c[2]],
+                            pos: [(wx as f32 + c[0]) * BLOCK, (wy as f32 + c[1]) * BLOCK, (wz as f32 + c[2]) * BLOCK],
                             uv: [
                                 uv_min[0] + (uv_max[0] - uv_min[0]) * cuv[0],
                                 uv_min[1] + (uv_max[1] - uv_min[1]) * cuv[1],
@@ -86,7 +87,7 @@ pub fn build(world: &World, atlas: &Atlas, key: ChunkKey) -> MeshData {
 fn push_model(mesh: &mut MeshData, model: &crate::model::ModelMesh, atlas: &Atlas, tile: u32, origin: Vec3) {
     let (uv_min, uv_max) = atlas.tile_uv(tile);
     for tri in model.indices.chunks_exact(3) {
-        let p: Vec<Vec3> = tri.iter().map(|&i| Vec3::from(model.vertices[i as usize]) + origin).collect();
+        let p: Vec<Vec3> = tri.iter().map(|&i| Vec3::from(model.vertices[i as usize]) * BLOCK + origin).collect();
         let n = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
         let s = shade(n);
         let base = mesh.vertices.len() as u32;

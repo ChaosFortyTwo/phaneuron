@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1120 970" width="1120" height="970" role="img" aria-labelledby="t d">
-<title id="t">How TinyVoxel maps PNG, glTF and WAV files to the game</title>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1120 1050" width="1120" height="1050" role="img" aria-labelledby="t d">
+<title id="t">How Phaneuron maps PNG, glTF and WAV files to the game</title>
 <desc id="d">Lookup order of asset folders, which file patterns control which in-game thing, and the fallback chain for one block face.</desc>
 <defs>
   <style>
@@ -72,8 +72,8 @@
     <path d="M8,-10 Q16,0 8,10 M14,-18 Q28,0 14,18" fill="none" stroke="#7a7a7a" stroke-dasharray="3 3"/>
   </g>
 </defs>
-<rect width="1120" height="970" fill="#fafaf7"/>
-<text x="30" y="46" class="h1">How TinyVoxel maps your files to the game</text>
+<rect width="1120" height="1050" fill="#fafaf7"/>
+<text x="30" y="46" class="h1">How Phaneuron maps your files to the game</text>
 <text x="30" y="68" class="small">Plain PNG, glTF and WAV files, found by name. Anything you do not provide falls back to a flat color.</text>
 
 <text x="30" y="108" class="h2">1 · WHERE THE ENGINE LOOKS (LATER FOLDER WINS, PER FILE PATH)</text>
@@ -125,45 +125,52 @@
 <text x="46" y="574.0" class="mono">textures/ui/crosshair.png</text>
 <path d="M444,570.0 H492" class="arrow"/>
 <rect x="496" y="538" width="594" height="64" rx="8" class="tgt"/>
-<text x="512" y="564.0" class="t">Drawn at screen center, scaled by ui_scale.</text>
-<text x="512" y="584.0" class="t">Delete the file to hide the crosshair.</text>
+<text x="512" y="564.0" class="t">Drawn at screen center. Delete the file to hide the crosshair.</text>
+<text x="512" y="584.0" class="t">Any PNG size works; it is shown 1 pixel = 1 UI pixel.</text>
 <use href="#icon-cross" xlink:href="#icon-cross" x="1040" y="566.0"/>
 <rect x="30" y="608" width="410" height="64" rx="8" class="file"/>
-<text x="46" y="644.0" class="mono">textures/sky/sky.png</text>
+<text x="46" y="644.0" class="mono">textures/ui/banner.png  ·  font.png</text>
 <path d="M444,640.0 H492" class="arrow"/>
 <rect x="496" y="608" width="594" height="64" rx="8" class="tgt"/>
-<text x="512" y="634.0" class="t">Equirectangular (2:1) skybox. If present it replaces the</text>
-<text x="512" y="654.0" class="t">gradient colors from config.toml [sky].</text>
+<text x="512" y="634.0" class="t">banner: full-screen menu background (scaled to cover the window).</text>
+<text x="512" y="654.0" class="t">font: 16x6 grid of ASCII 32..127; replace it to reskin all text.</text>
 <use href="#icon-sky" xlink:href="#icon-sky" x="1040" y="636.0"/>
 <rect x="30" y="678" width="410" height="64" rx="8" class="file"/>
-<text x="46" y="714.0" class="mono">textures/{player,npc,enemy}/&lt;name&gt;.png</text>
+<text x="46" y="714.0" class="mono">textures/sky/sky.png</text>
 <path d="M444,710.0 H492" class="arrow"/>
-<rect x="496" y="678" width="594" height="64" rx="8" class="resv"/>
-<text x="512" y="704.0" class="t">Reserved. Same lookup rule, same PNG-over-flat-color idea;</text>
-<text x="512" y="724.0" class="t">used once entities exist (not in v1). Models: models/&lt;kind&gt;/*.gltf.</text>
-<use href="#icon-ent" xlink:href="#icon-ent" x="1040" y="706.0"/>
+<rect x="496" y="678" width="594" height="64" rx="8" class="tgt"/>
+<text x="512" y="704.0" class="t">Equirectangular (2:1) skybox. If present it replaces the</text>
+<text x="512" y="724.0" class="t">gradient colors from config.toml [sky].</text>
+<use href="#icon-sky" xlink:href="#icon-sky" x="1040" y="706.0"/>
 <rect x="30" y="748" width="410" height="64" rx="8" class="file"/>
-<text x="46" y="784.0" class="mono">sounds/&lt;category&gt;/&lt;name&gt;.wav</text>
+<text x="46" y="784.0" class="mono">textures/{player,npc,enemy}/&lt;name&gt;.png</text>
 <path d="M444,780.0 H492" class="arrow"/>
 <rect x="496" y="748" width="594" height="64" rx="8" class="resv"/>
-<text x="512" y="774.0" class="t">Reserved. Plain WAV, found with the same rule.</text>
-<text x="512" y="794.0" class="t">Audio playback arrives after v1; the folder is ready.</text>
-<use href="#icon-snd" xlink:href="#icon-snd" x="1040" y="776.0"/>
-<text x="30" y="838" class="h2">3 · FALLBACK CHAIN FOR ONE BLOCK FACE (FIRST HIT WINS)</text>
-<rect x="30" y="854" width="236" height="62" rx="8" class="win"/>
-<text x="44" y="880" class="mono">textures/blocks/</text>
-<text x="44" y="900" class="mono bold">&lt;id&gt;_side.png</text>
-<path d="M270,885 H296" class="arrow"/>
-<rect x="302" y="854" width="236" height="62" rx="8" class="step"/>
-<text x="316" y="880" class="mono">texture = "..."</text>
-<text x="316" y="900" class="mono bold">path from the toml</text>
-<path d="M542,885 H568" class="arrow"/>
-<rect x="574" y="854" width="236" height="62" rx="8" class="step"/>
-<text x="588" y="880" class="mono">textures/blocks/</text>
-<text x="588" y="900" class="mono bold">&lt;id&gt;.png</text>
-<path d="M814,885 H840" class="arrow"/>
-<rect x="846" y="854" width="236" height="62" rx="8" class="step"/>
-<text x="860" y="880" class="mono">flat color</text>
-<text x="860" y="900" class="t bold">color_side → color → glTF</text>
-<text x="30" y="942" class="small">Same chain for top, side and bottom. Transparent PNG pixels become see-through cutouts.</text>
+<text x="512" y="774.0" class="t">Reserved. Same lookup rule, same PNG-over-flat-color idea;</text>
+<text x="512" y="794.0" class="t">used once entities exist (not in v1). Models: models/&lt;kind&gt;/*.gltf.</text>
+<use href="#icon-ent" xlink:href="#icon-ent" x="1040" y="776.0"/>
+<rect x="30" y="818" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="854.0" class="mono">sounds/&lt;category&gt;/&lt;name&gt;.wav</text>
+<path d="M444,850.0 H492" class="arrow"/>
+<rect x="496" y="818" width="594" height="64" rx="8" class="resv"/>
+<text x="512" y="844.0" class="t">Reserved. Plain WAV, found with the same rule.</text>
+<text x="512" y="864.0" class="t">Audio playback arrives after v1; the folder is ready.</text>
+<use href="#icon-snd" xlink:href="#icon-snd" x="1040" y="846.0"/>
+<text x="30" y="908" class="h2">3 · FALLBACK CHAIN FOR ONE BLOCK FACE (FIRST HIT WINS)</text>
+<rect x="30" y="924" width="236" height="62" rx="8" class="win"/>
+<text x="44" y="950" class="mono">textures/blocks/</text>
+<text x="44" y="970" class="mono bold">&lt;id&gt;_side.png</text>
+<path d="M270,955 H296" class="arrow"/>
+<rect x="302" y="924" width="236" height="62" rx="8" class="step"/>
+<text x="316" y="950" class="mono">texture = "..."</text>
+<text x="316" y="970" class="mono bold">path from the toml</text>
+<path d="M542,955 H568" class="arrow"/>
+<rect x="574" y="924" width="236" height="62" rx="8" class="step"/>
+<text x="588" y="950" class="mono">textures/blocks/</text>
+<text x="588" y="970" class="mono bold">&lt;id&gt;.png</text>
+<path d="M814,955 H840" class="arrow"/>
+<rect x="846" y="924" width="236" height="62" rx="8" class="step"/>
+<text x="860" y="950" class="mono">flat color</text>
+<text x="860" y="970" class="t bold">color_side → color → glTF</text>
+<text x="30" y="1012" class="small">Same chain for top, side and bottom. Transparent PNG pixels become see-through cutouts.</text>
 </svg>

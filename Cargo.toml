@@ -1,8 +1,8 @@
 [package]
-name = "tinyvoxel"
+name = "phaneuron"
 version = "0.1.0"
 edition = "2021"
-description = "A tiny, moddable, procedurally generated voxel world"
+description = "Phaneuron: a tiny, moddable, procedurally generated voxel world"
 
 [dependencies]
 wgpu = "=22.1.0"

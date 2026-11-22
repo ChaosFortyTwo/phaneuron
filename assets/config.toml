@@ -1,26 +1,28 @@
-# TinyVoxel settings. Every line is optional: delete any of them and the default is used.
+# Phaneuron settings. Every line is optional: delete any of them and the default is used.
 # Colors are "#rrggbb". Mods can ship their own config.toml to replace this file.
+# Each world has its own seed, chosen on the New World screen.
 
 [window]
-title = "TinyVoxel"
+title = "Phaneuron"
 width = 1280
 height = 720
 
 [render]
-render_distance = 8   # in chunks (16 blocks each)
+render_distance = 12  # in chunks (a chunk is 16 blocks = 8 world units)
 tile_size = 32        # every texture is resampled to tile_size x tile_size
-ui_scale = 2.0        # size multiplier for UI images such as the crosshair
+ui_scale = 0.0        # 0 = automatic (follows the window height); or 1.0, 2.0, 3.0 ...
 fov = 75.0
 
 [world]
-seed = 1337
-base_height = 30.0    # average ground level
-amplitude = 16.0      # how tall the hills get
-frequency = 0.012     # smaller = broader hills
+# Lengths below are in blocks. A block is half a world unit, so these numbers
+# are double what they would be if blocks were 1 unit wide.
+base_height = 60.0    # average ground level
+amplitude = 32.0      # how tall the hills get
+frequency = 0.006     # smaller = broader hills
 octaves = 4           # more = more small-scale bumps
 surface = "grass"     # block ids = file names in blocks/ without .toml
 subsurface = "dirt"
-subsurface_depth = 3
+subsurface_depth = 6
 deep = "stone"
 
 [sky]
@@ -31,9 +33,11 @@ fog_start = 0.55          # fractions of the view distance
 fog_end = 0.95
 
 [player]
+# Distances here are in world units (the player is 1.8 units tall).
 walk_speed = 4.5
 sprint_multiplier = 1.7
 jump_height = 1.25
 gravity = 28.0
 mouse_sensitivity = 0.0022
 eye_height = 1.62
+reach = 5.0           # how far you can break/place blocks

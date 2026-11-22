@@ -52,7 +52,9 @@ impl Default for BlockDef {
 }
 
 pub struct BlockInfo {
-    #[allow(dead_code)] // handy for future UI such as tooltips
+    /// File name in blocks/ without .toml. Stable key used in save files.
+    pub id: String,
+    /// Display name.
     pub name: String,
     pub solid: bool,
     /// True when this block hides neighbouring faces (opaque full cube).
@@ -144,7 +146,8 @@ pub fn load(assets: &Assets, tile_size: u32) -> Result<(Registry, Atlas)> {
     let missing = ts.solid([255, 0, 255]); // tile 0: "missing" magenta, also used for air
 
     let mut blocks = vec![BlockInfo {
-        name: "air".into(),
+        id: "air".into(),
+        name: "Air".into(),
         solid: false,
         occluding: false,
         tiles: [missing; 3],
@@ -205,6 +208,7 @@ pub fn load(assets: &Assets, tile_size: u32) -> Result<(Registry, Atlas)> {
 
         by_name.insert(id.clone(), blocks.len() as u16);
         blocks.push(BlockInfo {
+            id: id.clone(),
             name: def.name.unwrap_or(id),
             solid: def.solid,
             occluding: def.opaque && model.is_none(),

@@ -10,11 +10,11 @@ case "$(uname -s)-$(uname -m)" in
   MINGW*|MSYS*|CYGWIN*) name=windows-x86_64 ;;
   *) echo "unsupported platform: $(uname -s)-$(uname -m)"; exit 1 ;;
 esac
-exe=tinyvoxel; [[ $name == windows-* ]] && exe=tinyvoxel.exe
+exe=phaneuron; [[ $name == windows-* ]] && exe=phaneuron.exe
 
 cargo build --release
 out="dist/$name"
-rm -rf "$out"; mkdir -p "$out/mods"
+rm -rf "$out"; mkdir -p "$out/mods" "$out/saves"
 cp "target/release/$exe" "$out/"
 cp -r assets examples docs "$out/"
 cp README.md "$out/"

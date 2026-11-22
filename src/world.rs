@@ -1,14 +1,31 @@
 //! Infinite chunked world with procedural rolling hills.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use glam::Vec3;
 
 use crate::blocks::Registry;
 use crate::config::WorldCfg;
 
 pub const CW: usize = 16; // chunk width/depth in blocks
-pub const CH: usize = 96; // world height in blocks
+pub const CH: usize = 128; // world height in blocks
+/// Edge length of one block in world units. The player is 1.8 units tall, so a
+/// block is a little over a quarter of the player's height.
+pub const BLOCK: f32 = 0.5;
 
 pub type ChunkKey = (i32, i32);
+
+/// Player edits on top of the generated terrain: chunk -> (index inside chunk -> block id).
+pub type Edits = HashMap<ChunkKey, HashMap<u32, u16>>;
+
+/// Result of a block ray cast. `prev` is the empty cell the ray passed through
+/// just before hitting `cell` (where a new block would be placed).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hit {
+    pub cell: [i32; 3],
+    pub prev: [i32; 3],
+}
 
 pub struct Chunk {
     blocks: Vec<u16>,
@@ -28,9 +45,12 @@ impl Chunk {
 }
 
 pub struct World {
-    pub registry: Registry,
+    pub registry: Arc<Registry>,
     cfg: WorldCfg,
+    seed: u32,
     chunks: HashMap<ChunkKey, Chunk>,
+    edits: Edits,
+    edits_dirty: bool,
     surface: u16,
     subsurface: u16,
     deep: u16,
@@ -79,7 +99,7 @@ fn fbm(x: f32, z: f32, seed: u32, octaves: u32) -> f32 {
 // ---------- world ----------
 
 impl World {
-    pub fn new(registry: Registry, cfg: &WorldCfg) -> Self {
+    pub fn new(registry: Arc<Registry>, cfg: &WorldCfg, seed: u32) -> Self {
         let find = |name: &str| -> u16 {
             registry.id_of(name).unwrap_or_else(|| {
                 eprintln!("warning: world.toml block '{name}' not found, using a fallback");
@@ -87,13 +107,41 @@ impl World {
             })
         };
         let (surface, subsurface, deep) = (find(&cfg.surface), find(&cfg.subsurface), find(&cfg.deep));
-        World { registry, cfg: cfg.clone(), chunks: HashMap::new(), surface, subsurface, deep }
+        World {
+            registry,
+            cfg: cfg.clone(),
+            seed,
+            chunks: HashMap::new(),
+            edits: HashMap::new(),
+            edits_dirty: false,
+            surface,
+            subsurface,
+            deep,
+        }
+    }
+
+    pub fn edits(&self) -> &Edits {
+        &self.edits
+    }
+
+    /// Install edits loaded from disk. Call before generating chunks.
+    pub fn set_edits(&mut self, edits: Edits) {
+        self.edits = edits;
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.edits_dirty = true;
+    }
+
+    /// True once if edits changed since the last call (used to skip needless saves).
+    pub fn take_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.edits_dirty)
     }
 
     /// Top solid block y of the terrain column.
     pub fn height_at(&self, x: i32, z: i32) -> i32 {
         let c = &self.cfg;
-        let n = fbm(x as f32 * c.frequency, z as f32 * c.frequency, c.seed, c.octaves);
+        let n = fbm(x as f32 * c.frequency, z as f32 * c.frequency, self.seed, c.octaves);
         let h = c.base_height + (n - 0.5) * 2.0 * c.amplitude;
         (h.round() as i32).clamp(1, CH as i32 - 2)
     }
@@ -125,7 +173,100 @@ impl World {
                 max_y = max_y.max(h as usize);
             }
         }
+        if let Some(chunk_edits) = self.edits.get(&(cx, cz)) {
+            for (&idx, &id) in chunk_edits {
+                if (idx as usize) < blocks.len() && (id as usize) < self.registry.blocks.len() {
+                    blocks[idx as usize] = id;
+                    if id != 0 {
+                        max_y = max_y.max(idx as usize / (CW * CW));
+                    }
+                }
+            }
+        }
         self.chunks.insert((cx, cz), Chunk { blocks, max_y });
+    }
+
+    /// Change one block. Returns the chunks whose meshes must be rebuilt
+    /// (the edited chunk plus neighbours when the edit touches a chunk border).
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, id: u16) -> Vec<ChunkKey> {
+        if y < 0 || y >= CH as i32 {
+            return Vec::new();
+        }
+        let (cx, cz) = (x.div_euclid(CW as i32), z.div_euclid(CW as i32));
+        let (lx, lz) = (x.rem_euclid(CW as i32) as usize, z.rem_euclid(CW as i32) as usize);
+        let Some(chunk) = self.chunks.get_mut(&(cx, cz)) else { return Vec::new() };
+        let idx = Chunk::idx(lx, y as usize, lz);
+        if chunk.blocks[idx] == id {
+            return Vec::new();
+        }
+        chunk.blocks[idx] = id;
+        if id != 0 {
+            chunk.max_y = chunk.max_y.max(y as usize);
+        }
+        self.edits.entry((cx, cz)).or_default().insert(idx as u32, id);
+        self.edits_dirty = true;
+
+        let mut affected = vec![(cx, cz)];
+        if lx == 0 {
+            affected.push((cx - 1, cz));
+        }
+        if lx == CW - 1 {
+            affected.push((cx + 1, cz));
+        }
+        if lz == 0 {
+            affected.push((cx, cz - 1));
+        }
+        if lz == CW - 1 {
+            affected.push((cx, cz + 1));
+        }
+        affected
+    }
+
+    /// Walk a ray through the block grid (Amanatides & Woo) and return the first
+    /// non-air block within `reach` world units. `origin` and `dir` are in world units.
+    pub fn raycast(&self, origin: Vec3, dir: Vec3, reach: f32) -> Option<Hit> {
+        let d = dir.normalize_or_zero();
+        if d == Vec3::ZERO {
+            return None;
+        }
+        let o = origin / BLOCK;
+        let max_t = reach / BLOCK;
+        let mut cell = [o.x.floor() as i32, o.y.floor() as i32, o.z.floor() as i32];
+        if self.get(cell[0], cell[1], cell[2]) != 0 {
+            return None; // camera is inside a block
+        }
+        let mut step = [0i32; 3];
+        let mut t_max = [f32::INFINITY; 3];
+        let mut t_delta = [f32::INFINITY; 3];
+        for i in 0..3 {
+            if d[i] > 0.0 {
+                step[i] = 1;
+                t_delta[i] = 1.0 / d[i];
+                t_max[i] = (cell[i] as f32 + 1.0 - o[i]) / d[i];
+            } else if d[i] < 0.0 {
+                step[i] = -1;
+                t_delta[i] = -1.0 / d[i];
+                t_max[i] = (o[i] - cell[i] as f32) / -d[i];
+            }
+        }
+        loop {
+            let axis = if t_max[0] <= t_max[1] && t_max[0] <= t_max[2] {
+                0
+            } else if t_max[1] <= t_max[2] {
+                1
+            } else {
+                2
+            };
+            if t_max[axis] > max_t {
+                return None;
+            }
+            let prev = cell;
+            cell[axis] += step[axis];
+            t_max[axis] += t_delta[axis];
+            if self.get(cell[0], cell[1], cell[2]) != 0 {
+                return Some(Hit { cell, prev });
+            }
+        }
     }
 
     pub fn get(&self, x: i32, y: i32, z: i32) -> u16 {

@@ -53,7 +53,7 @@ pub struct WindowCfg {
 }
 impl Default for WindowCfg {
     fn default() -> Self {
-        Self { title: "TinyVoxel".into(), width: 1280, height: 720 }
+        Self { title: "Phaneuron".into(), width: 1280, height: 720 }
     }
 }
 
@@ -64,21 +64,20 @@ pub struct RenderCfg {
     pub render_distance: i32,
     /// Every block/texture tile is resampled to this square size (pixels).
     pub tile_size: u32,
-    /// Multiplier for UI image sizes.
+    /// UI size multiplier. 0 = automatic (follows the window height).
     pub ui_scale: f32,
     /// Vertical field of view in degrees.
     pub fov: f32,
 }
 impl Default for RenderCfg {
     fn default() -> Self {
-        Self { render_distance: 8, tile_size: 32, ui_scale: 2.0, fov: 75.0 }
+        Self { render_distance: 12, tile_size: 32, ui_scale: 0.0, fov: 75.0 }
     }
 }
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(default)]
 pub struct WorldCfg {
-    pub seed: u32,
     pub base_height: f32,
     pub amplitude: f32,
     pub frequency: f32,
@@ -92,14 +91,13 @@ pub struct WorldCfg {
 impl Default for WorldCfg {
     fn default() -> Self {
         Self {
-            seed: 1337,
-            base_height: 30.0,
-            amplitude: 16.0,
-            frequency: 0.012,
+            base_height: 60.0,
+            amplitude: 32.0,
+            frequency: 0.006,
             octaves: 4,
             surface: "grass".into(),
             subsurface: "dirt".into(),
-            subsurface_depth: 3,
+            subsurface_depth: 6,
             deep: "stone".into(),
         }
     }
@@ -137,6 +135,8 @@ pub struct PlayerCfg {
     pub gravity: f32,
     pub mouse_sensitivity: f32,
     pub eye_height: f32,
+    /// How far you can break/place blocks, in world units.
+    pub reach: f32,
 }
 impl Default for PlayerCfg {
     fn default() -> Self {
@@ -147,6 +147,7 @@ impl Default for PlayerCfg {
             gravity: 28.0,
             mouse_sensitivity: 0.0022,
             eye_height: 1.62,
+            reach: 5.0,
         }
     }
 }
