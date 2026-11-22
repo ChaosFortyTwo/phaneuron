@@ -1,0 +1,39 @@
+# TinyVoxel settings. Every line is optional: delete any of them and the default is used.
+# Colors are "#rrggbb". Mods can ship their own config.toml to replace this file.
+
+[window]
+title = "TinyVoxel"
+width = 1280
+height = 720
+
+[render]
+render_distance = 8   # in chunks (16 blocks each)
+tile_size = 32        # every texture is resampled to tile_size x tile_size
+ui_scale = 2.0        # size multiplier for UI images such as the crosshair
+fov = 75.0
+
+[world]
+seed = 1337
+base_height = 30.0    # average ground level
+amplitude = 16.0      # how tall the hills get
+frequency = 0.012     # smaller = broader hills
+octaves = 4           # more = more small-scale bumps
+surface = "grass"     # block ids = file names in blocks/ without .toml
+subsurface = "dirt"
+subsurface_depth = 3
+deep = "stone"
+
+[sky]
+top = "#4f8fe0"
+horizon = "#bfddf2"
+# fog_color = "#bfddf2"   # defaults to the horizon color
+fog_start = 0.55          # fractions of the view distance
+fog_end = 0.95
+
+[player]
+walk_speed = 4.5
+sprint_multiplier = 1.7
+jump_height = 1.25
+gravity = 28.0
+mouse_sensitivity = 0.0022
+eye_height = 1.62

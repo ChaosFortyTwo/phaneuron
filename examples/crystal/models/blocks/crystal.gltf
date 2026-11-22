@@ -1,0 +1,102 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "tinyvoxel example"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "crystal"
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "TEXCOORD_0": 1
+     },
+     "indices": 2,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "crystal",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.35,
+     0.75,
+     0.95,
+     1.0
+    ],
+    "metallicFactor": 0,
+    "roughnessFactor": 1
+   }
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 5,
+   "type": "VEC3",
+   "min": [
+    -0.4,
+    0,
+    -0.4
+   ],
+   "max": [
+    0.4,
+    0.9,
+    0.4
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 5,
+   "type": "VEC2"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5123,
+   "count": 18,
+   "type": "SCALAR"
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 60
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 60,
+   "byteLength": 40
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 100,
+   "byteLength": 36
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 136,
+   "uri": "data:application/octet-stream;base64,zczMvgAAAADNzMw+zczMPgAAAADNzMw+zczMPgAAAADNzMy+zczMvgAAAADNzMy+AAAAAGZmZj8AAAAAAAAAAAAAgD8AAIA/AACAPwAAAAAAAIA/AACAPwAAgD8AAAA/AAAAAAAAAQAEAAEAAgAEAAIAAwAEAAMAAAAEAAAAAwACAAAAAgABAA=="
+  }
+ ]
+}

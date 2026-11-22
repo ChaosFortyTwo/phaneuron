@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1120 970" width="1120" height="970" role="img" aria-labelledby="t d">
+<title id="t">How TinyVoxel maps PNG, glTF and WAV files to the game</title>
+<desc id="d">Lookup order of asset folders, which file patterns control which in-game thing, and the fallback chain for one block face.</desc>
+<defs>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2430; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; fill: #1d3a8a; }
+    .h1 { font-size: 24px; font-weight: 700; }
+    .h2 { font-size: 15px; font-weight: 700; letter-spacing: .04em; fill: #55607a; }
+    .t { font-size: 13px; }
+    .small { font-size: 12px; fill: #55607a; }
+    .bold { font-weight: 700; }
+    .file { fill: #eef3ff; stroke: #5b7fd6; stroke-width: 1.5; }
+    .tgt { fill: #fff7e8; stroke: #e0a030; stroke-width: 1.5; }
+    .resv { fill: #f3f3f3; stroke: #9a9a9a; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .arrow { stroke: #55607a; stroke-width: 2; fill: none; marker-end: url(#ah); }
+    .step { fill: #fff; stroke: #55607a; stroke-width: 1.5; }
+    .win { fill: #e6f6e9; stroke: #3c9a56; stroke-width: 2; }
+  </style>
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#55607a"/>
+  </marker>
+  <pattern id="chk" width="8" height="8" patternUnits="userSpaceOnUse">
+    <rect width="8" height="8" fill="#d9b27a"/><rect width="4" height="4" fill="#b58a52"/><rect x="4" y="4" width="4" height="4" fill="#b58a52"/>
+  </pattern>
+  <pattern id="chk2" width="8" height="8" patternUnits="userSpaceOnUse">
+    <rect width="8" height="8" fill="#9ad0f0"/><rect width="4" height="4" fill="#5fa8d8"/><rect x="4" y="4" width="4" height="4" fill="#5fa8d8"/>
+  </pattern>
+  <linearGradient id="skyg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#4f8fe0"/><stop offset="1" stop-color="#bfddf2"/>
+  </linearGradient>
+
+  <!-- icons, drawn around (0,0), about 60 px wide -->
+  <g id="cube-flat">
+    <polygon points="0,-24 26,-10 0,4 -26,-10" fill="#5cae48" stroke="#2f5a26"/>
+    <polygon points="-26,-10 0,4 0,32 -26,18" fill="#4a8f3a" stroke="#2f5a26"/>
+    <polygon points="0,4 26,-10 26,18 0,32" fill="#3f7a32" stroke="#2f5a26"/>
+  </g>
+  <g id="cube-top">
+    <polygon points="0,-24 26,-10 0,4 -26,-10" fill="url(#chk)" stroke="#2f5a26"/>
+    <polygon points="-26,-10 0,4 0,32 -26,18" fill="#4a8f3a" stroke="#2f5a26"/>
+    <polygon points="0,4 26,-10 26,18 0,32" fill="#3f7a32" stroke="#2f5a26"/>
+  </g>
+  <g id="cube-all">
+    <polygon points="0,-24 26,-10 0,4 -26,-10" fill="url(#chk)" stroke="#6b4a1f"/>
+    <polygon points="-26,-10 0,4 0,32 -26,18" fill="url(#chk)" stroke="#6b4a1f"/>
+    <polygon points="0,4 26,-10 26,18 0,32" fill="url(#chk)" stroke="#6b4a1f"/>
+    <polygon points="-26,-10 0,4 0,32 -26,18" fill="#000" opacity=".18"/>
+    <polygon points="0,4 26,-10 26,18 0,32" fill="#000" opacity=".32"/>
+  </g>
+  <g id="cube-model">
+    <polygon points="0,-24 26,-10 0,4 -26,-10 0,-24 0,-24 -26,-10 -26,18 0,32 26,18 26,-10" fill="none" stroke="#9a9a9a" stroke-dasharray="4 3"/>
+    <polygon points="-16,16 0,24 16,16 0,-18" fill="url(#chk2)" stroke="#1d5f8a"/>
+    <polygon points="0,-18 16,16 0,24" fill="#000" opacity=".25"/>
+  </g>
+  <g id="icon-cross">
+    <rect x="-30" y="-24" width="60" height="48" rx="4" fill="#dfeaf5" stroke="#9db4cc"/>
+    <path d="M0,-12 V-3 M0,3 V12 M-12,0 H-3 M3,0 H12" stroke="#fff" stroke-width="3" stroke-linecap="square"/>
+    <path d="M0,-12 V-3 M0,3 V12 M-12,0 H-3 M3,0 H12" stroke="#1f2430" stroke-width="1" opacity=".5"/>
+  </g>
+  <g id="icon-sky">
+    <rect x="-30" y="-24" width="60" height="48" rx="4" fill="url(#skyg)" stroke="#6a8fb8"/>
+    <circle cx="14" cy="-8" r="6" fill="#fff6c8"/>
+    <polygon points="-30,24 -30,10 -14,2 0,12 14,6 30,14 30,24" fill="#5cae48" stroke="#3c7a2e"/>
+  </g>
+  <g id="icon-ent">
+    <circle cx="0" cy="-12" r="8" fill="none" stroke="#7a7a7a" stroke-dasharray="3 3"/>
+    <path d="M-12,22 V6 Q0,-2 12,6 V22 Z" fill="none" stroke="#7a7a7a" stroke-dasharray="3 3"/>
+  </g>
+  <g id="icon-snd">
+    <path d="M-22,-8 H-12 L0,-20 V20 L-12,8 H-22 Z" fill="none" stroke="#7a7a7a" stroke-dasharray="3 3"/>
+    <path d="M8,-10 Q16,0 8,10 M14,-18 Q28,0 14,18" fill="none" stroke="#7a7a7a" stroke-dasharray="3 3"/>
+  </g>
+</defs>
+<rect width="1120" height="970" fill="#fafaf7"/>
+<text x="30" y="46" class="h1">How TinyVoxel maps your files to the game</text>
+<text x="30" y="68" class="small">Plain PNG, glTF and WAV files, found by name. Anything you do not provide falls back to a flat color.</text>
+
+<text x="30" y="108" class="h2">1 · WHERE THE ENGINE LOOKS (LATER FOLDER WINS, PER FILE PATH)</text>
+<rect x="30" y="120" width="200" height="64" rx="8" class="file"/>
+<text x="46" y="148" class="mono bold" style="font-size:15px">assets/</text>
+<text x="46" y="170" class="small">ships with the game</text>
+<rect x="270" y="120" width="200" height="64" rx="8" class="file"/>
+<text x="286" y="148" class="mono bold" style="font-size:15px">mods/alpha/</text>
+<text x="286" y="170" class="small">same layout as assets/</text>
+<rect x="510" y="120" width="200" height="64" rx="8" class="win"/>
+<text x="526" y="148" class="mono bold" style="font-size:15px">mods/beta/</text>
+<text x="526" y="170" class="small">mods load alphabetically</text>
+<path d="M234,152 H264" class="arrow"/><path d="M474,152 H504" class="arrow"/>
+<text x="740" y="142" class="t">Example: <tspan class="mono">mods/beta/textures/blocks/grass.png</tspan></text>
+<text x="740" y="162" class="t">replaces <tspan class="mono">assets/textures/blocks/grass.png</tspan></text>
+<text x="740" y="182" class="small">without touching the original file.</text>
+<text x="30" y="226" class="h2">2 · WHICH FILE CONTROLS WHAT</text>
+<text x="30" y="246" class="small">File (relative to any folder above)</text>
+<text x="500" y="246" class="small">What the engine does with it</text>
+<rect x="30" y="258" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="294.0" class="mono">blocks/&lt;id&gt;.toml</text>
+<path d="M444,290.0 H492" class="arrow"/>
+<rect x="496" y="258" width="594" height="64" rx="8" class="tgt"/>
+<text x="512" y="284.0" class="t">Declares a block: color, color_top/side/bottom, solid,</text>
+<text x="512" y="304.0" class="t">opaque, texture, model. The file name is the block id.</text>
+<use href="#cube-flat" xlink:href="#cube-flat" x="1040" y="286.0"/>
+<rect x="30" y="328" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="364.0" class="mono">textures/blocks/&lt;id&gt;_top.png</text>
+<path d="M444,360.0 H492" class="arrow"/>
+<rect x="496" y="328" width="594" height="64" rx="8" class="tgt"/>
+<text x="512" y="354.0" class="t">PNG for ONE face (also _side, _bottom). Highest priority;</text>
+<text x="512" y="374.0" class="t">other faces keep using lower rules.</text>
+<use href="#cube-top" xlink:href="#cube-top" x="1040" y="356.0"/>
+<rect x="30" y="398" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="434.0" class="mono">textures/blocks/&lt;id&gt;.png</text>
+<path d="M444,430.0 H492" class="arrow"/>
+<rect x="496" y="398" width="594" height="64" rx="8" class="tgt"/>
+<text x="512" y="424.0" class="t">PNG for every face without its own PNG. Any size;</text>
+<text x="512" y="444.0" class="t">resampled to tile_size (default 32).</text>
+<use href="#cube-all" xlink:href="#cube-all" x="1040" y="426.0"/>
+<rect x="30" y="468" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="504.0" class="mono">models/blocks/&lt;id&gt;.gltf</text>
+<path d="M444,500.0 H492" class="arrow"/>
+<rect x="496" y="468" width="594" height="64" rx="8" class="tgt"/>
+<text x="512" y="494.0" class="t">Set with model = "..." in the toml. Replaces the cube.</text>
+<text x="512" y="514.0" class="t">Origin bottom-center, 1 unit = 1 block. The block PNG is its texture.</text>
+<use href="#cube-model" xlink:href="#cube-model" x="1040" y="496.0"/>
+<rect x="30" y="538" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="574.0" class="mono">textures/ui/crosshair.png</text>
+<path d="M444,570.0 H492" class="arrow"/>
+<rect x="496" y="538" width="594" height="64" rx="8" class="tgt"/>
+<text x="512" y="564.0" class="t">Drawn at screen center, scaled by ui_scale.</text>
+<text x="512" y="584.0" class="t">Delete the file to hide the crosshair.</text>
+<use href="#icon-cross" xlink:href="#icon-cross" x="1040" y="566.0"/>
+<rect x="30" y="608" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="644.0" class="mono">textures/sky/sky.png</text>
+<path d="M444,640.0 H492" class="arrow"/>
+<rect x="496" y="608" width="594" height="64" rx="8" class="tgt"/>
+<text x="512" y="634.0" class="t">Equirectangular (2:1) skybox. If present it replaces the</text>
+<text x="512" y="654.0" class="t">gradient colors from config.toml [sky].</text>
+<use href="#icon-sky" xlink:href="#icon-sky" x="1040" y="636.0"/>
+<rect x="30" y="678" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="714.0" class="mono">textures/{player,npc,enemy}/&lt;name&gt;.png</text>
+<path d="M444,710.0 H492" class="arrow"/>
+<rect x="496" y="678" width="594" height="64" rx="8" class="resv"/>
+<text x="512" y="704.0" class="t">Reserved. Same lookup rule, same PNG-over-flat-color idea;</text>
+<text x="512" y="724.0" class="t">used once entities exist (not in v1). Models: models/&lt;kind&gt;/*.gltf.</text>
+<use href="#icon-ent" xlink:href="#icon-ent" x="1040" y="706.0"/>
+<rect x="30" y="748" width="410" height="64" rx="8" class="file"/>
+<text x="46" y="784.0" class="mono">sounds/&lt;category&gt;/&lt;name&gt;.wav</text>
+<path d="M444,780.0 H492" class="arrow"/>
+<rect x="496" y="748" width="594" height="64" rx="8" class="resv"/>
+<text x="512" y="774.0" class="t">Reserved. Plain WAV, found with the same rule.</text>
+<text x="512" y="794.0" class="t">Audio playback arrives after v1; the folder is ready.</text>
+<use href="#icon-snd" xlink:href="#icon-snd" x="1040" y="776.0"/>
+<text x="30" y="838" class="h2">3 · FALLBACK CHAIN FOR ONE BLOCK FACE (FIRST HIT WINS)</text>
+<rect x="30" y="854" width="236" height="62" rx="8" class="win"/>
+<text x="44" y="880" class="mono">textures/blocks/</text>
+<text x="44" y="900" class="mono bold">&lt;id&gt;_side.png</text>
+<path d="M270,885 H296" class="arrow"/>
+<rect x="302" y="854" width="236" height="62" rx="8" class="step"/>
+<text x="316" y="880" class="mono">texture = "..."</text>
+<text x="316" y="900" class="mono bold">path from the toml</text>
+<path d="M542,885 H568" class="arrow"/>
+<rect x="574" y="854" width="236" height="62" rx="8" class="step"/>
+<text x="588" y="880" class="mono">textures/blocks/</text>
+<text x="588" y="900" class="mono bold">&lt;id&gt;.png</text>
+<path d="M814,885 H840" class="arrow"/>
+<rect x="846" y="854" width="236" height="62" rx="8" class="step"/>
+<text x="860" y="880" class="mono">flat color</text>
+<text x="860" y="900" class="t bold">color_side → color → glTF</text>
+<text x="30" y="942" class="small">Same chain for top, side and bottom. Transparent PNG pixels become see-through cutouts.</text>
+</svg>

@@ -1,0 +1,6 @@
+# Example mod block: a glTF pyramid with a PNG texture.
+name = "Crystal"
+solid = true
+model = "models/blocks/crystal.gltf"   # path is relative to the mod folder (or assets/)
+# color = "#59c0f0"                    # used only if no PNG is found; otherwise the glTF material color
+# texture = "textures/blocks/crystal.png"   # optional: explicit PNG path (the <id>.png convention already finds it)

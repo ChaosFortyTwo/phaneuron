@@ -1,0 +1,3 @@
+name = "Grass"
+color = "#5cae48"
+color_bottom = "#7a5a3a"   # optional per-face colors: color_top, color_side, color_bottom
