@@ -28,14 +28,14 @@ jobs:
         run: |
           out=dist/${{ matrix.name }}
           mkdir -p "$out"
-          exe=tinyvoxel; [ "${{ matrix.os }}" = "windows-latest" ] && exe=tinyvoxel.exe
+          exe=phaneuron; [ "${{ matrix.os }}" = "windows-latest" ] && exe=phaneuron.exe
           cp "target/${{ matrix.target }}/release/$exe" "$out/"
           cp -r assets "$out/assets"
-          mkdir -p "$out/mods"
+          mkdir -p "$out/mods" "$out/saves"
           cp -r examples "$out/examples"
           cp -r docs "$out/docs"
           cp README.md "$out/"
       - uses: actions/upload-artifact@v4
         with:
-          name: tinyvoxel-${{ matrix.name }}
+          name: phaneuron-${{ matrix.name }}
           path: dist/${{ matrix.name }}
