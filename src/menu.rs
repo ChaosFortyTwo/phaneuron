@@ -4,6 +4,8 @@ use std::path::Path;
 
 use crate::input::Input;
 use crate::save::{self, WorldMeta};
+use crate::settings::Settings;
+use crate::settings_ui::SettingsScreen;
 use crate::ui::{col, col_a, Ui, GLYPH};
 
 pub enum Action {
@@ -24,6 +26,7 @@ pub enum Menu {
     Main { toast: Option<(String, f32)> },
     New(NewWorld),
     Load { worlds: Vec<WorldMeta>, scroll: f32 },
+    Settings(SettingsScreen),
 }
 
 const NAME_MAX: usize = 24;
@@ -39,7 +42,7 @@ impl Menu {
         Menu::Main { toast: Some((msg, 6.0)) }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, input: &Input, saves: &Path, dt: f32) -> Action {
+    pub fn ui(&mut self, ui: &mut Ui, input: &Input, saves: &Path, dt: f32, settings: &mut Settings) -> Action {
         ui.banner_bg();
         let mut action = Action::None;
         let mut next: Option<Menu> = None;
@@ -57,7 +60,7 @@ impl Menu {
 
                 let x = cx - bw / 2.0;
                 if ui.button(x, top, bw, bh, "Settings") {
-                    *toast = Some(("Settings are not available yet.".into(), 3.0));
+                    next = Some(Menu::Settings(SettingsScreen::new()));
                 }
                 if ui.button(x, top + (bh + gap), bw, bh, "New World") {
                     next = Some(Menu::New(NewWorld { name: "New World".into(), seed: String::new(), focus: 0 }));
@@ -76,6 +79,12 @@ impl Menu {
                     } else {
                         *toast = None;
                     }
+                }
+            }
+
+            Menu::Settings(screen) => {
+                if screen.ui(ui, input, settings) {
+                    next = Some(Menu::main());
                 }
             }
 

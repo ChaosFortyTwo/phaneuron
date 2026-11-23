@@ -1,4 +1,5 @@
-//! One running world: player, terrain streaming, block editing, HUD, saving.
+//! One running world: player, terrain streaming, block editing, camera, HUD,
+//! debug screen, console, saving.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -9,18 +10,38 @@ use glam::Vec3;
 use crate::blocks::{Atlas, Registry};
 use crate::config::Config;
 use crate::input::Input;
-use crate::mesh;
-use crate::player::{Keys, Player, HALF_WIDTH, HEIGHT};
+use crate::mesh::{self, MeshData};
+use crate::player::{Keys, Player, HALF_WIDTH};
+use crate::player_model;
 use crate::render::{Camera, Renderer};
 use crate::save::{self, PlayerSave, SaveData, Saved, WorldMeta};
-use crate::ui::{col, col_a, Tex, Ui, WHITE};
+use crate::ui::{col, col_a, Tex, Ui, GLYPH, WHITE};
 use crate::world::{Hit, World, BLOCK, CH, CW};
 
-const GEN_PER_FRAME: usize = 8;
-const MESH_PER_FRAME: usize = 4;
+/// Time per frame spent generating and meshing chunks.
+const GEN_BUDGET: Duration = Duration::from_millis(4);
+const MESH_BUDGET: Duration = Duration::from_millis(6);
 const AUTOSAVE: Duration = Duration::from_secs(60);
 const REPEAT_DELAY: f32 = 0.2;
 const HOTBAR_SLOTS: usize = 9;
+const THIRD_PERSON_DISTANCE: f32 = 3.5;
+const CONSOLE_LINES: usize = 12;
+const MAX_COORD: f32 = 1_000_000.0;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum View {
+    First,
+    ThirdBack,
+    ThirdFront,
+}
+
+#[derive(Default)]
+pub struct Console {
+    pub open: bool,
+    pub input: String,
+    /// (text, age in seconds)
+    pub lines: Vec<(String, f32)>,
+}
 
 pub struct Session {
     pub world: World,
@@ -29,6 +50,8 @@ pub struct Session {
     /// Index into the registry's non-air blocks.
     pub selected: usize,
     pub target: Option<Hit>,
+    pub view: View,
+    pub console: Console,
     cooldown: f32,
     last_save: Instant,
 }
@@ -74,7 +97,17 @@ impl Session {
             }
         }
 
-        Session { world, player, meta, selected, target: None, cooldown: 0.0, last_save: Instant::now() }
+        Session {
+            world,
+            player,
+            meta,
+            selected,
+            target: None,
+            view: View::First,
+            console: Console::default(),
+            cooldown: 0.0,
+            last_save: Instant::now(),
+        }
     }
 
     fn block_count(&self) -> usize {
@@ -85,12 +118,51 @@ impl Session {
         (self.selected + 1) as u16
     }
 
-    pub fn eye(&self, cfg: &Config) -> Vec3 {
-        self.player.pos + Vec3::new(0.0, cfg.player.eye_height + self.player.visual_dy, 0.0)
+    /// First-person eye position (also where block targeting starts).
+    pub fn eye(&self) -> Vec3 {
+        self.player.pos + Vec3::new(0.0, self.player.eye + self.player.visual_dy, 0.0)
     }
 
-    pub fn camera(&self, cfg: &Config) -> Camera {
-        Camera { eye: self.eye(cfg), forward: self.player.forward() }
+    /// Distance you can move from `origin` along `dir` before hitting a block (at most `max`).
+    fn free_distance(&self, origin: Vec3, dir: Vec3, max: f32) -> f32 {
+        let mut t = 0.1;
+        while t < max {
+            let p = (origin + dir * t) / BLOCK;
+            if self.world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32) != 0 {
+                return (t - 0.2).max(0.1);
+            }
+            t += 0.05;
+        }
+        max
+    }
+
+    pub fn camera(&self) -> Camera {
+        let eye = self.eye();
+        let fwd = self.player.forward();
+        match self.view {
+            View::First => Camera { eye, forward: fwd },
+            View::ThirdBack => {
+                let d = self.free_distance(eye, -fwd, THIRD_PERSON_DISTANCE);
+                Camera { eye: eye - fwd * d, forward: fwd }
+            }
+            View::ThirdFront => {
+                let d = self.free_distance(eye, fwd, THIRD_PERSON_DISTANCE);
+                Camera { eye: eye + fwd * d, forward: -fwd }
+            }
+        }
+    }
+
+    pub fn cycle_view(&mut self) {
+        self.view = match self.view {
+            View::First => View::ThirdBack,
+            View::ThirdBack => View::ThirdFront,
+            View::ThirdFront => View::First,
+        };
+    }
+
+    /// The player figure, only drawn in third person.
+    pub fn model_mesh(&self, atlas: &Atlas) -> Option<MeshData> {
+        (self.view != View::First).then(|| player_model::build(&self.player, &self.world.registry.player_tiles, atlas))
     }
 
     /// Outline box of the block under the crosshair.
@@ -103,26 +175,38 @@ impl Session {
 
     pub fn update(&mut self, dt: f32, keys: &Keys, cfg: &Config) {
         self.player.update(dt, keys, &self.world, &cfg.player);
-        self.target = self.world.raycast(self.eye(cfg), self.player.forward(), cfg.player.reach);
+        self.target = self.world.raycast(self.eye(), self.player.forward(), cfg.player.reach);
+        for line in &mut self.console.lines {
+            line.1 += dt;
+        }
+        self.console.lines.retain(|l| l.1 < 120.0);
     }
 
-    /// Generate nearby chunks and build a few meshes per frame.
+    /// Generate nearby chunks and build meshes, within a per-frame time budget.
     pub fn stream(&mut self, renderer: &mut Renderer, atlas: &Atlas, cfg: &Config) {
         let center = chunk_of(self.player.pos);
         let rd = cfg.render.render_distance;
-        for key in self.world.stream(center, rd, GEN_PER_FRAME) {
+        for key in self.world.unload_far(center, rd) {
             renderer.remove_chunk(key);
         }
-        let mut built = 0;
-        for key in self.world.mesh_candidates(center, rd) {
-            if built >= MESH_PER_FRAME {
+
+        let start = Instant::now();
+        for key in self.world.missing_chunks(center, rd) {
+            self.world.generate(key);
+            if start.elapsed() >= GEN_BUDGET {
                 break;
             }
+        }
+
+        let start = Instant::now();
+        for key in self.world.mesh_candidates(center, rd) {
             if renderer.has_mesh(key) {
                 continue;
             }
             renderer.upload(key, mesh::build(&self.world, atlas, key));
-            built += 1;
+            if start.elapsed() >= MESH_BUDGET {
+                break;
+            }
         }
     }
 
@@ -149,7 +233,10 @@ impl Session {
         let lo = Vec3::new(cell[0] as f32, cell[1] as f32, cell[2] as f32) * BLOCK;
         let hi = lo + Vec3::splat(BLOCK);
         let p = self.player.pos;
-        let (pmin, pmax) = (Vec3::new(p.x - HALF_WIDTH, p.y, p.z - HALF_WIDTH), Vec3::new(p.x + HALF_WIDTH, p.y + HEIGHT, p.z + HALF_WIDTH));
+        let (pmin, pmax) = (
+            Vec3::new(p.x - HALF_WIDTH, p.y, p.z - HALF_WIDTH),
+            Vec3::new(p.x + HALF_WIDTH, p.y + self.player.height(), p.z + HALF_WIDTH),
+        );
         lo.x < pmax.x && hi.x > pmin.x && lo.y < pmax.y && hi.y > pmin.y && lo.z < pmax.z && hi.z > pmin.z
     }
 
@@ -206,6 +293,200 @@ impl Session {
             self.world.mark_dirty();
         }
         r
+    }
+
+    // ---------- console commands ----------
+
+    fn say(&mut self, text: impl Into<String>) {
+        self.console.lines.push((text.into(), 0.0));
+        if self.console.lines.len() > 200 {
+            self.console.lines.remove(0);
+        }
+    }
+
+    /// Run one console line such as `/tp 10 40 -5`. Output goes to the console.
+    pub fn run_command(&mut self, line: &str) {
+        let line = line.trim();
+        if line.is_empty() {
+            return;
+        }
+        self.say(format!("> {line}"));
+        let mut parts = line.trim_start_matches('/').split_whitespace();
+        let cmd = parts.next().unwrap_or("").to_ascii_lowercase();
+        let args: Vec<&str> = parts.collect();
+        match cmd.as_str() {
+            "tp" => self.cmd_tp(&args),
+            "switch" => {
+                self.player.flying = !self.player.flying;
+                self.player.vel_y = 0.0;
+                let msg = if self.player.flying {
+                    "Free flying ON (jump = up, sneak = down, sprint = faster). /switch to land."
+                } else {
+                    "Free flying OFF."
+                };
+                self.say(msg);
+            }
+            "help" => {
+                self.say("/tp <x> <y> <z>   teleport (world units, ~ = relative)");
+                self.say("/tp <x> <z>       teleport to the surface there");
+                self.say("/switch           toggle free flying");
+            }
+            _ => self.say(format!("Unknown command '{cmd}'. Try /help")),
+        }
+    }
+
+    fn cmd_tp(&mut self, args: &[&str]) {
+        let usage = "Usage: /tp <x> <y> <z>  or  /tp <x> <z>   (numbers in world units, ~ is relative)";
+        if args.len() != 2 && args.len() != 3 {
+            return self.say(usage);
+        }
+        let cur = self.player.pos;
+        let parse = |s: &str, base: f32| -> Option<f32> {
+            let v = if let Some(rest) = s.strip_prefix('~') {
+                base + if rest.is_empty() { 0.0 } else { rest.parse::<f32>().ok()? }
+            } else {
+                s.parse::<f32>().ok()?
+            };
+            v.is_finite().then_some(v)
+        };
+        let (x, y, z) = if args.len() == 3 {
+            (parse(args[0], cur.x), parse(args[1], cur.y).map(Some), parse(args[2], cur.z))
+        } else {
+            (parse(args[0], cur.x), Some(None), parse(args[1], cur.z))
+        };
+        let (Some(x), Some(y), Some(z)) = (x, y, z) else { return self.say(usage) };
+        let (x, z) = (x.clamp(-MAX_COORD, MAX_COORD), z.clamp(-MAX_COORD, MAX_COORD));
+
+        // Load the destination right away so we never land inside ungenerated ground.
+        let (cx, cz) = chunk_of(Vec3::new(x, 0.0, z));
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if !self.world.has_chunk((cx + dx, cz + dz)) {
+                    self.world.generate((cx + dx, cz + dz));
+                }
+            }
+        }
+        let height = self.player.height();
+        let mut y = match y {
+            Some(y) => y.max(0.0),
+            None => {
+                let (bx, bz) = ((x / BLOCK).floor() as i32, (z / BLOCK).floor() as i32);
+                (self.world.height_at(bx, bz) as f32 + 1.0) * BLOCK
+            }
+        };
+        // If the target is inside terrain, rise to the first free spot.
+        let top = CH as f32 * BLOCK;
+        while Player::collides(&self.world, Vec3::new(x, y, z), height) && y < top {
+            y += BLOCK;
+        }
+        self.player.pos = Vec3::new(x, y, z);
+        self.player.vel_y = 0.0;
+        self.say(format!("Teleported to {:.2} {:.2} {:.2}", x, y, z));
+    }
+
+    /// Typing, Enter and Esc for the console, then draw it. Call every frame.
+    pub fn console_ui(&mut self, ui: &mut Ui, input: &Input) {
+        if self.console.open {
+            for c in input.typed.chars() {
+                if (c.is_ascii_graphic() || c == ' ') && self.console.input.len() < 120 {
+                    self.console.input.push(c);
+                }
+            }
+            if input.backspace {
+                self.console.input.pop();
+            }
+            if input.enter {
+                let line = std::mem::take(&mut self.console.input);
+                self.run_command(&line);
+            }
+            if input.escape {
+                self.console.open = false;
+            }
+        }
+
+        let max_chars = ((ui.w - 8.0) / GLYPH) as usize;
+        let fit = |s: &str| -> String { s.chars().take(max_chars).collect() };
+        let n = if self.console.open { CONSOLE_LINES } else { 6 };
+        let visible: Vec<&String> = self
+            .console
+            .lines
+            .iter()
+            .filter(|l| self.console.open || l.1 < 6.0)
+            .rev()
+            .take(n)
+            .map(|l| &l.0)
+            .collect();
+
+        let row = 10.0;
+        let input_y = ui.h - 16.0;
+        let base_y = if self.console.open { input_y - 4.0 } else { ui.h - 44.0 };
+        if self.console.open {
+            let top = base_y - visible.len() as f32 * row - 6.0;
+            ui.dl.rect(0.0, top, ui.w, ui.h - top, col_a(0x000000, 0.72));
+        }
+        for (i, line) in visible.iter().enumerate() {
+            let y = base_y - (i as f32 + 1.0) * row;
+            ui.dl.text_shadow(4.0, y, 1.0, &fit(line), col(0xe8eef8));
+        }
+        if self.console.open {
+            let shown = fit(&format!("> {}", self.console.input));
+            let w = ui.dl.text(4.0, input_y, 1.0, &shown, col(0xffffff));
+            if (ui.time * 2.0) % 2.0 < 1.0 {
+                ui.dl.text(4.0 + w, input_y, 1.0, "_", col(0xffe9a8));
+            }
+        }
+    }
+
+    // ---------- HUD ----------
+
+    /// Lines for the F3 screen.
+    pub fn debug_lines(&self, fps: f32, cfg: &Config) -> Vec<String> {
+        let p = &self.player;
+        let cell = |v: f32| (v / BLOCK).floor() as i32;
+        let (ch_x, ch_z) = chunk_of(p.pos);
+        let looking = match self.target {
+            Some(h) => {
+                let id = self.world.get(h.cell[0], h.cell[1], h.cell[2]);
+                let b = &self.world.registry.blocks[id as usize];
+                format!("{} (id {}, \"{}\") at {} {} {}", b.name, id, b.id, h.cell[0], h.cell[1], h.cell[2])
+            }
+            None => "nothing in reach".to_string(),
+        };
+        let mode = if p.flying {
+            "flying"
+        } else if p.sneaking {
+            "sneaking"
+        } else if p.on_ground {
+            "walking"
+        } else {
+            "airborne"
+        };
+        let view = match self.view {
+            View::First => "first person",
+            View::ThirdBack => "third person (back)",
+            View::ThirdFront => "third person (front)",
+        };
+        vec![
+            format!("Phaneuron  {fps:.0} fps"),
+            format!("XYZ: {:.2} / {:.2} / {:.2}", p.pos.x, p.pos.y, p.pos.z),
+            format!("Block: {} / {} / {}   Chunk: {} / {}", cell(p.pos.x), cell(p.pos.y), cell(p.pos.z), ch_x, ch_z),
+            format!("Facing: yaw {:.0} deg, pitch {:.0} deg", p.yaw.to_degrees().rem_euclid(360.0), p.pitch.to_degrees()),
+            format!("Looking at: {looking}"),
+            format!("Mode: {mode}   View: {view}"),
+            format!("Render distance: {} chunks   Loaded: {}", cfg.render.render_distance, self.world.chunk_count()),
+            format!("World: {}   Seed: {}", self.meta.name, self.meta.seed),
+        ]
+    }
+
+    pub fn debug_overlay(&self, ui: &mut Ui, fps: f32, cfg: &Config) {
+        let lines = self.debug_lines(fps, cfg);
+        let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        let w = (max_chars as f32 * GLYPH + 10.0).min(ui.w - 4.0);
+        ui.dl.rect(2.0, 2.0, w, lines.len() as f32 * 11.0 + 6.0, col_a(0x000000, 0.55));
+        for (i, l) in lines.iter().enumerate() {
+            let color = if i == 0 { col(0xffe9a8) } else { col(0xffffff) };
+            ui.dl.text(6.0, 5.0 + i as f32 * 11.0, 1.0, l, color);
+        }
     }
 
     /// Crosshair and hotbar.

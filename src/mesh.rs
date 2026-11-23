@@ -22,7 +22,7 @@ pub struct MeshData {
 }
 
 /// (neighbour offset, 4 corners counter-clockwise seen from outside, atlas slot: 0 top, 1 side, 2 bottom)
-const FACES: [([i32; 3], [[f32; 3]; 4], usize); 6] = [
+pub const FACES: [([i32; 3], [[f32; 3]; 4], usize); 6] = [
     ([1, 0, 0], [[1., 0., 1.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]], 1),
     ([-1, 0, 0], [[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]], 1),
     ([0, 0, 1], [[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]], 1),
@@ -30,10 +30,10 @@ const FACES: [([i32; 3], [[f32; 3]; 4], usize); 6] = [
     ([0, 1, 0], [[0., 1., 1.], [1., 1., 1.], [1., 1., 0.], [0., 1., 0.]], 0),
     ([0, -1, 0], [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]], 2),
 ];
-const CORNER_UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
+pub const CORNER_UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
 
 /// Half-lambert shading from a fixed sun direction: gives the flat low-poly look.
-fn shade(n: Vec3) -> f32 {
+pub fn shade(n: Vec3) -> f32 {
     let sun = Vec3::new(0.4, 1.0, 0.25).normalize();
     0.55 + 0.45 * (n.dot(sun) * 0.5 + 0.5)
 }

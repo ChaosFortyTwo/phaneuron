@@ -17,6 +17,14 @@ pub struct Input {
     pub right_click: bool,
     pub left_held: bool,
     pub right_held: bool,
+    /// Rebindable-key actions that fire once per press.
+    pub toggle_debug: bool,
+    pub toggle_console: bool,
+    pub cycle_camera: bool,
+    /// The "free mouse" key is currently held.
+    pub free_mouse: bool,
+    /// Last key pressed this frame (used while rebinding keys).
+    pub last_key: Option<winit::keyboard::KeyCode>,
 }
 
 impl Input {
@@ -31,5 +39,9 @@ impl Input {
         self.digit = None;
         self.click = false;
         self.right_click = false;
+        self.toggle_debug = false;
+        self.toggle_console = false;
+        self.cycle_camera = false;
+        self.last_key = None;
     }
 }

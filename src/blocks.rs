@@ -64,10 +64,21 @@ pub struct BlockInfo {
     pub model: Option<ModelMesh>,
 }
 
+/// Colors of the player model parts (head, body, arm, leg, eye) when no PNG is supplied.
+const PLAYER_PARTS: [(&str, [u8; 3]); 5] = [
+    ("head", [232, 184, 148]),
+    ("body", [58, 123, 213]),
+    ("arm", [232, 184, 148]),
+    ("leg", [59, 63, 140]),
+    ("eye", [32, 32, 40]),
+];
+
 pub struct Registry {
     /// Index 0 is always air.
     pub blocks: Vec<BlockInfo>,
     by_name: HashMap<String, u16>,
+    /// Atlas tiles for the player model: head, body, arm, leg, eye.
+    pub player_tiles: [u32; 5],
 }
 
 impl Registry {
@@ -221,6 +232,13 @@ pub fn load(assets: &Assets, tile_size: u32) -> Result<(Registry, Atlas)> {
         bail!("no block definitions found in assets/blocks/*.toml");
     }
 
+    // Player model parts: textures/player/<part>.png, else a flat color.
+    let mut player_tiles = [missing; 5];
+    for (i, (part, color)) in PLAYER_PARTS.iter().enumerate() {
+        let png = assets.resolve(&format!("textures/player/{part}.png")).and_then(|p| ts.png(&p));
+        player_tiles[i] = png.unwrap_or_else(|| ts.solid(*color));
+    }
+
     // Pack tiles into one atlas image.
     let n = ts.tiles.len() as u32;
     let cols = ATLAS_COLUMNS.min(n);
@@ -231,5 +249,5 @@ pub fn load(assets: &Assets, tile_size: u32) -> Result<(Registry, Atlas)> {
         imageops::replace(&mut image, tile, (cx * tile_size) as i64, (cy * tile_size) as i64);
     }
 
-    Ok((Registry { blocks, by_name }, Atlas { image, tile_size, cols }))
+    Ok((Registry { blocks, by_name, player_tiles }, Atlas { image, tile_size, cols }))
 }

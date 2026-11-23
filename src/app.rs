@@ -22,15 +22,17 @@ use crate::blocks::{Atlas, Registry};
 use crate::config::Config;
 use crate::game::Session;
 use crate::input::Input;
+use crate::keys::Bind;
 use crate::menu::{Action, Menu};
 use crate::player::Keys;
 use crate::render::{Renderer, Scene};
 use crate::save::{self, WorldMeta};
+use crate::settings::Settings;
+use crate::settings_ui::SettingsScreen;
 use crate::ui::{col, col_a, DrawList, Tex, Ui};
 
 /// Read-only things every screen needs.
 struct Ctx<'a> {
-    cfg: &'a Config,
     registry: &'a Arc<Registry>,
     atlas: &'a Atlas,
     saves: &'a PathBuf,
@@ -55,6 +57,12 @@ struct State {
     started: Instant,
     fps_timer: Instant,
     frames: u32,
+    fps: f32,
+    show_debug: bool,
+    cfg: Config,
+    settings: Settings,
+    pause_settings: Option<SettingsScreen>,
+    base: PathBuf,
 }
 
 pub struct App {
@@ -87,6 +95,11 @@ fn open_folder(path: &std::path::Path) {
 
 impl State {
     fn new(event_loop: &ActiveEventLoop, assets: &Assets, cfg: &Config, atlas: &Atlas) -> Result<State> {
+        let base = assets.base.clone();
+        let settings = Settings::load(&base, cfg);
+        let mut cfg = cfg.clone();
+        settings.apply(&mut cfg);
+
         let window = Arc::new(
             event_loop
                 .create_window(
@@ -96,7 +109,7 @@ impl State {
                 )
                 .context("cannot create window")?,
         );
-        let renderer = pollster::block_on(Renderer::new(window.clone(), assets, cfg, atlas))?;
+        let renderer = pollster::block_on(Renderer::new(window.clone(), assets, &cfg, atlas))?;
         window.request_redraw();
         Ok(State {
             window,
@@ -110,7 +123,17 @@ impl State {
             started: Instant::now(),
             fps_timer: Instant::now(),
             frames: 0,
+            fps: 0.0,
+            show_debug: false,
+            cfg,
+            settings,
+            pause_settings: None,
+            base,
         })
+    }
+
+    fn console_open(&self) -> bool {
+        matches!(&self.screen, Screen::Playing(s) if s.console.open)
     }
 
     fn set_grab(&mut self, grab: bool) {
@@ -127,7 +150,6 @@ impl State {
         } else {
             let _ = self.window.set_cursor_grab(CursorGrabMode::None);
             self.window.set_cursor_visible(true);
-            self.keys = Keys::default();
         }
     }
 
@@ -135,23 +157,23 @@ impl State {
 
     fn key(&mut self, ev: &KeyEvent) {
         let down = ev.state == ElementState::Pressed;
+        let fresh = down && !ev.repeat;
         if down {
             if let Some(t) = &ev.text {
                 self.input.typed.push_str(t.as_str());
             }
         }
         let PhysicalKey::Code(code) = ev.physical_key else { return };
+        if fresh {
+            self.input.last_key = Some(code);
+        }
+
+        // fixed keys
         match code {
-            KeyCode::KeyW => self.keys.forward = down,
-            KeyCode::KeyS => self.keys.back = down,
-            KeyCode::KeyA => self.keys.left = down,
-            KeyCode::KeyD => self.keys.right = down,
-            KeyCode::Space => self.keys.jump = down,
-            KeyCode::ShiftLeft | KeyCode::ShiftRight => self.keys.sprint = down,
             KeyCode::Backspace if down => self.input.backspace = true,
-            KeyCode::Enter | KeyCode::NumpadEnter if down && !ev.repeat => self.input.enter = true,
-            KeyCode::Tab if down && !ev.repeat => self.input.tab = true,
-            KeyCode::Escape if down && !ev.repeat => self.input.escape = true,
+            KeyCode::Enter | KeyCode::NumpadEnter if fresh => self.input.enter = true,
+            KeyCode::Tab if fresh => self.input.tab = true,
+            KeyCode::Escape if fresh => self.input.escape = true,
             KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 | KeyCode::Digit5
             | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 | KeyCode::Digit9
                 if down =>
@@ -168,6 +190,26 @@ impl State {
                     _ => 8,
                 });
             }
+            _ => {}
+        }
+
+        // rebindable keys. While the console is open, movement keys are ignored but
+        // key-up still clears them, so nothing gets stuck.
+        let typing = self.console_open();
+        let Some(bind) = self.settings.binds.lookup(code) else { return };
+        let held = down && !typing;
+        match bind {
+            Bind::Forward => self.keys.forward = held,
+            Bind::Back => self.keys.back = held,
+            Bind::Left => self.keys.left = held,
+            Bind::Right => self.keys.right = held,
+            Bind::Jump => self.keys.jump = held,
+            Bind::Sprint => self.keys.sprint = held,
+            Bind::Sneak => self.keys.sneak = held,
+            Bind::FreeMouse => self.input.free_mouse = held,
+            Bind::Debug if fresh => self.input.toggle_debug = true,
+            Bind::Console if fresh => self.input.toggle_console = true,
+            Bind::Camera if fresh && !typing => self.input.cycle_camera = true,
             _ => {}
         }
     }
@@ -198,12 +240,12 @@ impl State {
         };
     }
 
-    fn mouse_motion(&mut self, cfg: &Config, (dx, dy): (f64, f64)) {
+    fn mouse_motion(&mut self, (dx, dy): (f64, f64)) {
         if !self.grabbed {
             return;
         }
         if let Screen::Playing(s) = &mut self.screen {
-            let sens = cfg.player.mouse_sensitivity;
+            let sens = self.cfg.player.mouse_sensitivity;
             s.player.yaw += dx as f32 * sens;
             let lim = 89f32.to_radians();
             s.player.pitch = (s.player.pitch - dy as f32 * sens).clamp(-lim, lim);
@@ -214,6 +256,8 @@ impl State {
         if let Screen::Playing(_) = self.screen {
             self.pause();
         }
+        self.keys = Keys::default();
+        self.input.free_mouse = false;
     }
 
     // ---------- transitions ----------
@@ -221,10 +265,14 @@ impl State {
     fn pause(&mut self) {
         let screen = std::mem::replace(&mut self.screen, Screen::Menu(Menu::main()));
         self.screen = match screen {
-            Screen::Playing(s) => Screen::Paused(s),
+            Screen::Playing(mut s) => {
+                s.console.open = false;
+                Screen::Paused(s)
+            }
             other => other,
         };
-        self.set_grab(false);
+        self.pause_settings = None;
+        self.keys = Keys::default();
     }
 
     fn resume(&mut self) {
@@ -233,8 +281,8 @@ impl State {
             Screen::Paused(s) => Screen::Playing(s),
             other => other,
         };
+        self.pause_settings = None;
         self.input.left_held = false;
-        self.set_grab(true);
     }
 
     fn start_session(&mut self, ctx: &Ctx, meta: WorldMeta) {
@@ -247,10 +295,10 @@ impl State {
             }
         };
         self.renderer.clear_chunks();
-        let session = Session::start(ctx.registry.clone(), ctx.cfg, meta, saved);
+        let session = Session::start(ctx.registry.clone(), &self.cfg, meta, saved);
         self.screen = Screen::Playing(session);
         self.input.left_held = false;
-        self.set_grab(true);
+        self.keys = Keys::default();
     }
 
     /// Save the running world (if any) and show the main menu.
@@ -262,8 +310,8 @@ impl State {
                 self.screen = Screen::Menu(Menu::main_with_message(format!("Save failed: {e}")));
             }
         }
+        self.pause_settings = None;
         self.renderer.clear_chunks();
-        self.set_grab(false);
     }
 
     fn apply(&mut self, ctx: &Ctx, action: Action) {
@@ -284,9 +332,10 @@ impl State {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.05);
         self.last = now;
+        let settings_before = self.settings.clone();
 
         let (pw, ph) = self.renderer.size();
-        let scale = if ctx.cfg.render.ui_scale > 0.0 { ctx.cfg.render.ui_scale } else { (ph as f32 / 360.0).floor().max(1.0) };
+        let scale = if self.cfg.render.ui_scale > 0.0 { self.cfg.render.ui_scale } else { (ph as f32 / 360.0).floor().max(1.0) };
         let mut ui = Ui {
             dl: DrawList::default(),
             w: pw as f32 / scale,
@@ -302,49 +351,94 @@ impl State {
         let mut want_pause = false;
         let mut want_resume = false;
         let mut want_menu = false;
+        let mut close_settings = false;
 
         match &mut self.screen {
-            Screen::Menu(menu) => action = menu.ui(&mut ui, &self.input, ctx.saves, dt),
+            Screen::Menu(menu) => action = menu.ui(&mut ui, &self.input, ctx.saves, dt, &mut self.settings),
             Screen::Playing(s) => {
-                s.update(dt, &self.keys, ctx.cfg);
-                s.stream(&mut self.renderer, ctx.atlas, ctx.cfg);
-                if self.input.wheel != 0.0 {
-                    s.select_delta(if self.input.wheel > 0.0 { -1 } else { 1 });
+                // Esc pauses, unless it is closing the console this frame.
+                want_pause = self.input.escape && !s.console.open;
+                if self.input.toggle_console {
+                    s.console.open = !s.console.open;
+                    self.input.typed.clear();
                 }
-                if let Some(d) = self.input.digit {
-                    s.select(d);
+                if self.input.toggle_debug {
+                    self.show_debug = !self.show_debug;
                 }
-                s.interact(dt, &self.input, &mut self.renderer, ctx.atlas);
+                if self.input.cycle_camera {
+                    s.cycle_view();
+                }
+                let typing = s.console.open;
+                let keys = if typing { Keys::default() } else { self.keys };
+
+                s.update(dt, &keys, &self.cfg);
+                s.stream(&mut self.renderer, ctx.atlas, &self.cfg);
+                if !typing {
+                    if self.input.wheel != 0.0 {
+                        s.select_delta(if self.input.wheel > 0.0 { -1 } else { 1 });
+                    }
+                    if let Some(d) = self.input.digit {
+                        s.select(d);
+                    }
+                    // clicks only edit blocks while the mouse is captured (not while Alt frees it)
+                    if self.grabbed && !self.input.free_mouse {
+                        s.interact(dt, &self.input, &mut self.renderer, ctx.atlas);
+                    }
+                }
                 s.hud(&mut ui, ctx.atlas);
+                if self.show_debug {
+                    s.debug_overlay(&mut ui, self.fps, &self.cfg);
+                }
+                s.console_ui(&mut ui, &self.input);
                 s.autosave();
-                want_pause = self.input.escape;
             }
             Screen::Paused(s) => {
-                s.stream(&mut self.renderer, ctx.atlas, ctx.cfg);
+                s.stream(&mut self.renderer, ctx.atlas, &self.cfg);
                 ui.dl.rect(0.0, 0.0, ui.w, ui.h, col_a(0x000000, 0.55));
-                let (bw, bh, gap) = (176.0, 22.0, 8.0);
-                let top = (ui.h - (2.0 * bh + gap)) / 2.0;
-                let x = (ui.w - bw) / 2.0;
-                ui.dl.text_centered(ui.w / 2.0, top - 34.0, 2.0, "Paused", col(0xffe9a8));
-                if ui.button(x, top, bw, bh, "Resume") || self.input.escape {
-                    want_resume = true;
-                }
-                if ui.button(x, top + bh + gap, bw, bh, "Save and Quit") {
-                    want_menu = true;
+                if let Some(ss) = &mut self.pause_settings {
+                    close_settings = ss.ui(&mut ui, &self.input, &mut self.settings);
+                } else {
+                    let (bw, bh, gap) = (176.0, 22.0, 8.0);
+                    let top = (ui.h - (3.0 * bh + 2.0 * gap)) / 2.0;
+                    let x = (ui.w - bw) / 2.0;
+                    ui.dl.text_centered(ui.w / 2.0, top - 34.0, 2.0, "Paused", col(0xffe9a8));
+                    if ui.button(x, top, bw, bh, "Resume") || self.input.escape {
+                        want_resume = true;
+                    }
+                    if ui.button(x, top + bh + gap, bw, bh, "Settings") {
+                        self.pause_settings = Some(SettingsScreen::new());
+                    }
+                    if ui.button(x, top + 2.0 * (bh + gap), bw, bh, "Save and Quit") {
+                        want_menu = true;
+                    }
                 }
             }
+        }
+        if close_settings {
+            self.pause_settings = None;
+        }
+
+        // The mouse is captured only while actually playing: not in menus, not while
+        // typing in the console, and not while the "free mouse" key is held.
+        let want_grab = matches!(&self.screen, Screen::Playing(s) if !s.console.open) && !self.input.free_mouse;
+        if want_grab != self.grabbed {
+            self.set_grab(want_grab);
         }
 
         // ---- render ----
         let camera = match &self.screen {
-            Screen::Playing(s) | Screen::Paused(s) => Some(s.camera(ctx.cfg)),
+            Screen::Playing(s) | Screen::Paused(s) => Some(s.camera()),
             Screen::Menu(_) => None,
         };
         let highlight = match &self.screen {
             Screen::Playing(s) => s.highlight(),
             _ => None,
         };
-        let scene = Scene { camera: camera.as_ref(), highlight, ui: &ui.dl, ui_scale: scale };
+        let model = match &self.screen {
+            Screen::Playing(s) | Screen::Paused(s) => s.model_mesh(ctx.atlas),
+            Screen::Menu(_) => None,
+        };
+        let scene = Scene { camera: camera.as_ref(), highlight, dynamic: model.as_ref(), ui: &ui.dl, ui_scale: scale };
         match self.renderer.render(&scene) {
             Ok(()) => {}
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -368,16 +462,22 @@ impl State {
         }
         self.apply(ctx, action);
 
+        // ---- settings changed this frame: apply live and save ----
+        if self.settings != settings_before {
+            self.settings.apply(&mut self.cfg);
+            self.renderer.set_view(self.cfg.render.render_distance, self.cfg.render.fov);
+            if let Err(e) = self.settings.save(&self.base) {
+                eprintln!("cannot save settings: {e:#}");
+            }
+        }
+
         // ---- title / fps ----
         self.frames += 1;
         if self.fps_timer.elapsed() >= Duration::from_millis(500) {
-            let fps = self.frames as f32 / self.fps_timer.elapsed().as_secs_f32();
+            self.fps = self.frames as f32 / self.fps_timer.elapsed().as_secs_f32();
             let title = match &self.screen {
-                Screen::Playing(s) | Screen::Paused(s) => {
-                    let p = s.player.pos;
-                    format!("{} | {} | {:.0} fps | x {:.1} y {:.1} z {:.1}", ctx.cfg.window.title, s.meta.name, fps, p.x, p.y, p.z)
-                }
-                Screen::Menu(_) => ctx.cfg.window.title.clone(),
+                Screen::Playing(s) | Screen::Paused(s) => format!("{} | {}", self.cfg.window.title, s.meta.name),
+                Screen::Menu(_) => self.cfg.window.title.clone(),
             };
             self.window.set_title(&title);
             self.frames = 0;
@@ -423,13 +523,7 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => st.wheel(delta),
             WindowEvent::Focused(false) => st.lost_focus(),
             WindowEvent::RedrawRequested => {
-                let ctx = Ctx {
-                    cfg: &self.cfg,
-                    registry: &self.registry,
-                    atlas: &self.atlas,
-                    saves: &self.saves,
-                    base: &self.assets.base,
-                };
+                let ctx = Ctx { registry: &self.registry, atlas: &self.atlas, saves: &self.saves, base: &self.assets.base };
                 st.frame(&ctx);
                 st.window.request_redraw();
             }
@@ -439,7 +533,7 @@ impl ApplicationHandler for App {
 
     fn device_event(&mut self, _el: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
         if let (DeviceEvent::MouseMotion { delta }, Some(st)) = (event, self.state.as_mut()) {
-            st.mouse_motion(&self.cfg, delta);
+            st.mouse_motion(delta);
         }
     }
 }

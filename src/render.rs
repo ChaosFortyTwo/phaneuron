@@ -17,6 +17,8 @@ use crate::ui::{DrawList, Tex, UiVertex};
 use crate::world::{BLOCK, CW};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const DYN_VERTS: usize = 1024;
+const DYN_INDICES: usize = 2048;
 
 pub struct Camera {
     pub eye: Vec3,
@@ -28,6 +30,8 @@ pub struct Scene<'a> {
     pub camera: Option<&'a Camera>,
     /// World-space box (min, max) to outline, e.g. the targeted block.
     pub highlight: Option<(Vec3, Vec3)>,
+    /// A small mesh rebuilt every frame (the player model), drawn with the terrain pipeline.
+    pub dynamic: Option<&'a MeshData>,
     pub ui: &'a DrawList,
     pub ui_scale: f32,
 }
@@ -79,8 +83,12 @@ pub struct Renderer {
     ui_vbuf: wgpu::Buffer,
     ui_cap: usize,
     line_vbuf: wgpu::Buffer,
+    dyn_vb: wgpu::Buffer,
+    dyn_ib: wgpu::Buffer,
 
     fov: f32,
+    fog_start_frac: f32,
+    fog_end_frac: f32,
     fog_start: f32,
     fog_end: f32,
     fog_color: [f32; 3],
@@ -453,6 +461,19 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let dyn_vb = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dynamic vb"),
+            size: (DYN_VERTS * std::mem::size_of::<Vertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let dyn_ib = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dynamic ib"),
+            size: (DYN_INDICES * 4) as u64,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let view_dist = cfg.render.render_distance as f32 * CW as f32 * BLOCK;
         let sky = &cfg.sky;
         Ok(Renderer {
@@ -475,7 +496,11 @@ impl Renderer {
             ui_vbuf,
             ui_cap,
             line_vbuf,
+            dyn_vb,
+            dyn_ib,
             fov: cfg.render.fov,
+            fog_start_frac: sky.fog_start,
+            fog_end_frac: sky.fog_end,
             fog_start: view_dist * sky.fog_start,
             fog_end: view_dist * sky.fog_end,
             fog_color: sky.fog_color.unwrap_or(sky.horizon).linear(),
@@ -501,6 +526,14 @@ impl Renderer {
         self.config.height = h;
         self.surface.configure(&self.device, &self.config);
         self.depth = make_depth(&self.device, w, h);
+    }
+
+    /// Re-aim the fog (and fov) after the player changed settings.
+    pub fn set_view(&mut self, render_distance: i32, fov: f32) {
+        let view_dist = render_distance as f32 * CW as f32 * BLOCK;
+        self.fog_start = view_dist * self.fog_start_frac;
+        self.fog_end = view_dist * self.fog_end_frac;
+        self.fov = fov;
     }
 
     pub fn has_mesh(&self, key: (i32, i32)) -> bool {
@@ -574,6 +607,15 @@ impl Renderer {
             self.queue.write_buffer(&self.line_vbuf, 0, bytemuck::cast_slice(&verts));
         }
 
+        let mut dyn_count = 0;
+        if let Some(m) = scene.dynamic {
+            if m.vertices.len() <= DYN_VERTS && m.indices.len() <= DYN_INDICES && !m.indices.is_empty() {
+                self.queue.write_buffer(&self.dyn_vb, 0, bytemuck::cast_slice(&m.vertices));
+                self.queue.write_buffer(&self.dyn_ib, 0, bytemuck::cast_slice(&m.indices));
+                dyn_count = m.indices.len() as u32;
+            }
+        }
+
         let (sw, sh) = (self.config.width as f32, self.config.height as f32);
         let ui_verts: Vec<UiVertex> = scene
             .ui
@@ -634,6 +676,12 @@ impl Renderer {
                     pass.set_vertex_buffer(0, mesh.vb.slice(..));
                     pass.set_index_buffer(mesh.ib.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..mesh.count, 0, 0..1);
+                }
+
+                if dyn_count > 0 {
+                    pass.set_vertex_buffer(0, self.dyn_vb.slice(..));
+                    pass.set_index_buffer(self.dyn_ib.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..dyn_count, 0, 0..1);
                 }
 
                 if scene.highlight.is_some() {

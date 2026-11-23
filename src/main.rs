@@ -4,12 +4,16 @@ mod blocks;
 mod config;
 mod game;
 mod input;
+mod keys;
 mod menu;
 mod mesh;
 mod model;
 mod player;
+mod player_model;
 mod render;
 mod save;
+mod settings;
+mod settings_ui;
 mod ui;
 mod world;
 

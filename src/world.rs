@@ -307,9 +307,8 @@ impl World {
         self.registry.blocks[self.get(x, y, z) as usize].occluding
     }
 
-    /// Generate up to `budget` missing chunks near `center` (nearest first) and
-    /// drop chunks that are far away. Returns the keys that were dropped.
-    pub fn stream(&mut self, center: ChunkKey, render_distance: i32, budget: usize) -> Vec<ChunkKey> {
+    /// Chunks inside the generation circle that are not loaded yet, nearest first.
+    pub fn missing_chunks(&self, center: ChunkKey, render_distance: i32) -> Vec<ChunkKey> {
         let r = render_distance + 1;
         let mut wanted: Vec<(i32, ChunkKey)> = Vec::new();
         for dz in -r..=r {
@@ -322,11 +321,12 @@ impl World {
             }
         }
         wanted.sort_unstable();
-        for (_, key) in wanted.into_iter().take(budget) {
-            self.generate(key);
-        }
+        wanted.into_iter().map(|(_, k)| k).collect()
+    }
 
-        let limit = r + 2;
+    /// Drop chunks far outside the view; returns the dropped keys.
+    pub fn unload_far(&mut self, center: ChunkKey, render_distance: i32) -> Vec<ChunkKey> {
+        let limit = render_distance + 3;
         let far: Vec<ChunkKey> = self
             .chunks
             .keys()
@@ -337,6 +337,20 @@ impl World {
             self.chunks.remove(k);
         }
         far
+    }
+
+    /// Generate up to `budget` missing chunks near `center` (nearest first) and
+    /// drop chunks that are far away. Returns the keys that were dropped.
+    #[cfg(test)]
+    pub fn stream(&mut self, center: ChunkKey, render_distance: i32, budget: usize) -> Vec<ChunkKey> {
+        for key in self.missing_chunks(center, render_distance).into_iter().take(budget) {
+            self.generate(key);
+        }
+        self.unload_far(center, render_distance)
+    }
+
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
     }
 
     /// Chunks inside the render circle that can be meshed (all 4 neighbours loaded), nearest first.

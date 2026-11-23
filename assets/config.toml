@@ -8,7 +8,7 @@ width = 1280
 height = 720
 
 [render]
-render_distance = 12  # in chunks (a chunk is 16 blocks = 8 world units)
+render_distance = 12  # default view distance in chunks (a chunk is 16 blocks = 8 world units); Settings can raise it to 32
 tile_size = 32        # every texture is resampled to tile_size x tile_size
 ui_scale = 0.0        # 0 = automatic (follows the window height); or 1.0, 2.0, 3.0 ...
 fov = 75.0
@@ -33,11 +33,16 @@ fog_start = 0.55          # fractions of the view distance
 fog_end = 0.95
 
 [player]
-# Distances here are in world units (the player is 1.8 units tall).
+# Distances here are in world units. The hitbox is 2.0 units (4 blocks) tall, 1.0 (2 blocks) while sneaking.
 walk_speed = 4.5
 sprint_multiplier = 1.7
+sneak_multiplier = 0.35   # walking speed while sneaking (C)
+fly_speed = 10.0          # /switch free-flying speed
 jump_height = 1.25
 gravity = 28.0
-mouse_sensitivity = 0.0022
-eye_height = 1.62
-reach = 5.0           # how far you can break/place blocks
+mouse_sensitivity = 0.0022   # can also be changed in Settings
+eye_height = 1.8
+reach = 5.0               # how far you can break/place blocks
+
+# Render distance, mouse speed, field of view and key bindings are set in the game's
+# Settings screen and saved to settings.toml next to the game; they override the values above.

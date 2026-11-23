@@ -134,9 +134,14 @@ pub struct PlayerCfg {
     pub jump_height: f32,
     pub gravity: f32,
     pub mouse_sensitivity: f32,
+    /// Eye height while standing (the hitbox is 2.0 units = 4 blocks tall).
     pub eye_height: f32,
     /// How far you can break/place blocks, in world units.
     pub reach: f32,
+    /// Walking speed multiplier while sneaking.
+    pub sneak_multiplier: f32,
+    /// Free-flying speed in world units per second.
+    pub fly_speed: f32,
 }
 impl Default for PlayerCfg {
     fn default() -> Self {
@@ -146,8 +151,10 @@ impl Default for PlayerCfg {
             jump_height: 1.25,
             gravity: 28.0,
             mouse_sensitivity: 0.0022,
-            eye_height: 1.62,
+            eye_height: 1.8,
             reach: 5.0,
+            sneak_multiplier: 0.35,
+            fly_speed: 10.0,
         }
     }
 }
