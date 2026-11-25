@@ -28,7 +28,13 @@ pub enum Tex {
     Banner,
     Crosshair,
     Atlas,
+    /// Offscreen 3D world preview (see render.rs).
+    Preview,
 }
+
+/// Pixel size of the offscreen world preview (4:3).
+pub const PREVIEW_W: u32 = 512;
+pub const PREVIEW_H: u32 = 384;
 
 pub struct Cmd {
     pub tex: Tex,

@@ -25,6 +25,7 @@ use crate::input::Input;
 use crate::keys::Bind;
 use crate::menu::{Action, Menu};
 use crate::player::Keys;
+use crate::preview::{self, PreviewState};
 use crate::render::{Renderer, Scene};
 use crate::save::{self, WorldMeta};
 use crate::settings::Settings;
@@ -59,6 +60,7 @@ struct State {
     frames: u32,
     fps: f32,
     show_debug: bool,
+    preview: PreviewState,
     cfg: Config,
     settings: Settings,
     pause_settings: Option<SettingsScreen>,
@@ -125,6 +127,7 @@ impl State {
             frames: 0,
             fps: 0.0,
             show_debug: false,
+            preview: PreviewState::None,
             cfg,
             settings,
             pause_settings: None,
@@ -301,6 +304,21 @@ impl State {
         self.keys = Keys::default();
     }
 
+    /// Build the 3D preview for a world picked on the Load World screen.
+    fn build_preview(&mut self, ctx: &Ctx, meta: &WorldMeta) {
+        match preview::build(ctx.registry, ctx.atlas, &self.cfg, meta) {
+            Ok(built) => {
+                self.renderer.set_preview(&built.meshes, built.target);
+                self.preview = PreviewState::Ready(built.info);
+            }
+            Err(e) => {
+                eprintln!("cannot preview {}: {e:#}", meta.folder.display());
+                self.renderer.clear_preview();
+                self.preview = PreviewState::Failed(meta.folder.clone(), format!("{e}"));
+            }
+        }
+    }
+
     /// Save the running world (if any) and show the main menu.
     fn leave_to_menu(&mut self) {
         let screen = std::mem::replace(&mut self.screen, Screen::Menu(Menu::main()));
@@ -319,6 +337,7 @@ impl State {
             Action::None => {}
             Action::OpenFiles => open_folder(ctx.base),
             Action::Load(meta) => self.start_session(ctx, meta),
+            Action::Select(meta) => self.build_preview(ctx, &meta),
             Action::Create { name, seed } => match save::create_world(ctx.saves, &name, seed) {
                 Ok(meta) => self.start_session(ctx, meta),
                 Err(e) => self.screen = Screen::Menu(Menu::main_with_message(format!("Could not create world: {e}"))),
@@ -354,7 +373,7 @@ impl State {
         let mut close_settings = false;
 
         match &mut self.screen {
-            Screen::Menu(menu) => action = menu.ui(&mut ui, &self.input, ctx.saves, dt, &mut self.settings),
+            Screen::Menu(menu) => action = menu.ui(&mut ui, &self.input, ctx.saves, dt, &mut self.settings, &self.preview),
             Screen::Playing(s) => {
                 // Esc pauses, unless it is closing the console this frame.
                 want_pause = self.input.escape && !s.console.open;
@@ -438,7 +457,9 @@ impl State {
             Screen::Playing(s) | Screen::Paused(s) => s.model_mesh(ctx.atlas),
             Screen::Menu(_) => None,
         };
-        let scene = Scene { camera: camera.as_ref(), highlight, dynamic: model.as_ref(), ui: &ui.dl, ui_scale: scale };
+        let showing_preview = matches!(&self.screen, Screen::Menu(Menu::Load { .. })) && matches!(self.preview, PreviewState::Ready(_));
+        let preview_angle = showing_preview.then(|| self.started.elapsed().as_secs_f32() * 0.4);
+        let scene = Scene { camera: camera.as_ref(), highlight, dynamic: model.as_ref(), ui: &ui.dl, ui_scale: scale, preview_angle };
         match self.renderer.render(&scene) {
             Ok(()) => {}
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -451,6 +472,10 @@ impl State {
 
         // ---- transitions (after drawing, so no borrows are alive) ----
         self.input.end_frame();
+        if !matches!(&self.screen, Screen::Menu(Menu::Load { .. })) && !matches!(self.preview, PreviewState::None) {
+            self.renderer.clear_preview();
+            self.preview = PreviewState::None;
+        }
         if want_pause {
             self.pause();
         }

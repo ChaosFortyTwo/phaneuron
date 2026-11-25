@@ -13,7 +13,7 @@ use crate::assets::Assets;
 use crate::blocks::Atlas;
 use crate::config::Config;
 use crate::mesh::{MeshData, Vertex};
-use crate::ui::{DrawList, Tex, UiVertex};
+use crate::ui::{DrawList, Tex, UiVertex, PREVIEW_H, PREVIEW_W};
 use crate::world::{BLOCK, CW};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -34,6 +34,8 @@ pub struct Scene<'a> {
     pub dynamic: Option<&'a MeshData>,
     pub ui: &'a DrawList,
     pub ui_scale: f32,
+    /// Orbit angle (radians) for the Load World preview; None = do not draw it this frame.
+    pub preview_angle: Option<f32>,
 }
 
 #[repr(C)]
@@ -85,6 +87,14 @@ pub struct Renderer {
     line_vbuf: wgpu::Buffer,
     dyn_vb: wgpu::Buffer,
     dyn_ib: wgpu::Buffer,
+
+    // offscreen world preview (Load World screen)
+    preview_view: wgpu::TextureView,
+    preview_depth: wgpu::TextureView,
+    preview_globals_buf: wgpu::Buffer,
+    preview_globals_bg: wgpu::BindGroup,
+    preview_meshes: Vec<GpuMesh>,
+    preview_target: Vec3,
 
     fov: f32,
     fog_start_frac: f32,
@@ -270,6 +280,23 @@ impl Renderer {
         let white = RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255]));
         let white_view = make_texture(&device, &queue, &white, "ui white");
         ui_tex.insert(Tex::White, UiTexture { bind_group: tex_bg(&white_view, &nearest, "ui white bg"), size: (1, 1) });
+        let preview_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("world preview"),
+            size: wgpu::Extent3d { width: PREVIEW_W, height: PREVIEW_H, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let preview_sample_view = preview_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let preview_view = preview_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let preview_depth = make_depth(&device, PREVIEW_W, PREVIEW_H);
+        ui_tex.insert(
+            Tex::Preview,
+            UiTexture { bind_group: tex_bg(&preview_sample_view, &linear, "ui preview bg"), size: (PREVIEW_W, PREVIEW_H) },
+        );
         ui_tex.insert(Tex::Atlas, UiTexture { bind_group: tex_bg(&atlas_view, &nearest, "ui atlas bg"), size: atlas.image.dimensions() });
         for (tex, rel, sampler) in [
             (Tex::Font, "textures/ui/font.png", &nearest),
@@ -297,6 +324,18 @@ impl Renderer {
             label: Some("globals bg"),
             layout: &globals_bgl,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() }],
+        });
+
+        let preview_globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("preview globals"),
+            size: std::mem::size_of::<Globals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let preview_globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("preview globals bg"),
+            layout: &globals_bgl,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: preview_globals_buf.as_entire_binding() }],
         });
 
         // ----- pipelines -----
@@ -498,6 +537,12 @@ impl Renderer {
             line_vbuf,
             dyn_vb,
             dyn_ib,
+            preview_view,
+            preview_depth,
+            preview_globals_buf,
+            preview_globals_bg,
+            preview_meshes: Vec::new(),
+            preview_target: Vec3::ZERO,
             fov: cfg.render.fov,
             fog_start_frac: sky.fog_start,
             fog_end_frac: sky.fog_end,
@@ -549,28 +594,42 @@ impl Renderer {
         self.meshes.clear();
     }
 
-    pub fn upload(&mut self, key: (i32, i32), mesh: MeshData) {
+    fn make_mesh(&self, mesh: &MeshData, center: Vec3) -> Option<GpuMesh> {
         if mesh.indices.is_empty() {
-            self.meshes.insert(key, None);
-            return;
+            return None;
         }
         let vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("chunk vb"),
+            label: Some("mesh vb"),
             contents: bytemuck::cast_slice(&mesh.vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("chunk ib"),
+            label: Some("mesh ib"),
             contents: bytemuck::cast_slice(&mesh.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
+        Some(GpuMesh { vb, ib, count: mesh.indices.len() as u32, center })
+    }
+
+    pub fn upload(&mut self, key: (i32, i32), mesh: MeshData) {
         let half = CW as f32 * BLOCK / 2.0;
         let center = Vec3::new(
             key.0 as f32 * CW as f32 * BLOCK + half,
             0.0,
             key.1 as f32 * CW as f32 * BLOCK + half,
         );
-        self.meshes.insert(key, Some(GpuMesh { vb, ib, count: mesh.indices.len() as u32, center }));
+        let gpu = self.make_mesh(&mesh, center);
+        self.meshes.insert(key, gpu);
+    }
+
+    /// Set what the Load World preview shows: meshes in world space and the point to orbit.
+    pub fn set_preview(&mut self, meshes: &[MeshData], target: Vec3) {
+        self.preview_meshes = meshes.iter().filter_map(|m| self.make_mesh(m, target)).collect();
+        self.preview_target = target;
+    }
+
+    pub fn clear_preview(&mut self) {
+        self.preview_meshes.clear();
     }
 
     pub fn render(&mut self, scene: &Scene) -> Result<(), wgpu::SurfaceError> {
@@ -591,6 +650,25 @@ impl Renderer {
                 params: [self.fog_start, self.fog_end, self.sky_has_tex as u32 as f32, 0.0],
             };
             self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
+        }
+
+        let preview_on = scene.preview_angle.is_some() && !self.preview_meshes.is_empty();
+        if let (true, Some(angle)) = (preview_on, scene.preview_angle) {
+            let eye = self.preview_target + Vec3::new(angle.sin() * 40.0, 30.0, angle.cos() * 40.0);
+            let proj = Mat4::perspective_rh(40f32.to_radians(), PREVIEW_W as f32 / PREVIEW_H as f32, 0.1, 500.0);
+            let view = Mat4::look_at_rh(eye, self.preview_target, Vec3::Y);
+            let vp = proj * view;
+            let v4 = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
+            let globals = Globals {
+                view_proj: vp.to_cols_array_2d(),
+                inv_view_proj: vp.inverse().to_cols_array_2d(),
+                cam_pos: [eye.x, eye.y, eye.z, 1.0],
+                fog_color: v4(self.fog_color),
+                sky_top: v4(self.sky_top),
+                sky_horizon: v4(self.sky_horizon),
+                params: [1.0e6, 2.0e6, self.sky_has_tex as u32 as f32, 0.0], // no fog in the preview
+            };
+            self.queue.write_buffer(&self.preview_globals_buf, 0, bytemuck::bytes_of(&globals));
         }
 
         if let Some((lo, hi)) = scene.highlight {
@@ -639,6 +717,35 @@ impl Renderer {
         let frame = self.surface.get_current_texture()?;
         let color_view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+        if preview_on {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("preview"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.preview_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.preview_depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.sky_pipe);
+            pass.set_bind_group(0, &self.preview_globals_bg, &[]);
+            pass.set_bind_group(1, &self.sky_bg, &[]);
+            pass.draw(0..3, 0..1);
+            pass.set_pipeline(&self.chunk_pipe);
+            pass.set_bind_group(0, &self.preview_globals_bg, &[]);
+            pass.set_bind_group(1, &self.atlas_bg, &[]);
+            for mesh in &self.preview_meshes {
+                pass.set_vertex_buffer(0, mesh.vb.slice(..));
+                pass.set_index_buffer(mesh.ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.count, 0, 0..1);
+            }
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),

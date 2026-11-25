@@ -39,11 +39,18 @@ pub fn shade(n: Vec3) -> f32 {
 }
 
 pub fn build(world: &World, atlas: &Atlas, key: ChunkKey) -> MeshData {
+    build_from(world, atlas, key, 0)
+}
+
+/// Like `build`, but ignores everything below block row `y_min` and closes the mesh
+/// there with a floor, giving a clean slab (used for the world preview).
+pub fn build_from(world: &World, atlas: &Atlas, key: ChunkKey, y_min: i32) -> MeshData {
     let mut mesh = MeshData::default();
     let Some(chunk) = world.chunk(key) else { return mesh };
     let reg = &world.registry;
+    let occ = |x: i32, y: i32, z: i32| if y_min > 0 && y < y_min { false } else { world.occludes(x, y, z) };
 
-    for y in 0..=chunk.max_y.min(CH - 1) {
+    for y in (y_min.max(0) as usize)..=chunk.max_y.min(CH - 1) {
         for z in 0..CW {
             for x in 0..CW {
                 let id = chunk.get(x, y, z);
@@ -60,7 +67,7 @@ pub fn build(world: &World, atlas: &Atlas, key: ChunkKey) -> MeshData {
                 }
 
                 for (n, corners, slot) in &FACES {
-                    if world.occludes(wx + n[0], wy + n[1], wz + n[2]) {
+                    if occ(wx + n[0], wy + n[1], wz + n[2]) {
                         continue;
                     }
                     let (uv_min, uv_max) = atlas.tile_uv(block.tiles[*slot]);

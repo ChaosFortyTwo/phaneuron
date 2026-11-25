@@ -10,6 +10,7 @@ mod mesh;
 mod model;
 mod player;
 mod player_model;
+mod preview;
 mod render;
 mod save;
 mod settings;

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1120 1130" width="1120" height="1130" role="img" aria-labelledby="t d">
-<title id="t">How Phaneuron maps PNG, glTF and WAV files to the game</title>
+<title id="t">How Phaneuron maps PNG and glTF files to the game</title>
 <desc id="d">Lookup order of asset folders, which file patterns control which in-game thing, and the fallback chain for one block face.</desc>
 <defs>
   <style>
@@ -82,7 +82,7 @@
 </defs>
 <rect width="1120" height="1130" fill="#fafaf7"/>
 <text x="30" y="46" class="h1">How Phaneuron maps your files to the game</text>
-<text x="30" y="68" class="small">Plain PNG, glTF and WAV files, found by name. Anything you do not provide falls back to a flat color.</text>
+<text x="30" y="68" class="small">Plain PNG and glTF files, found by name. Anything you do not provide falls back to a flat color.</text>
 
 <text x="30" y="108" class="h2">1 · WHERE THE ENGINE LOOKS (LATER FOLDER WINS, PER FILE PATH)</text>
 <rect x="30" y="120" width="200" height="64" rx="8" class="file"/>
@@ -165,11 +165,11 @@
 <text x="512" y="864.0" class="t">used once those entities exist. Models: models/&lt;kind&gt;/*.gltf.</text>
 <use href="#icon-ent" xlink:href="#icon-ent" x="1040" y="846.0"/>
 <rect x="30" y="888" width="410" height="64" rx="8" class="file"/>
-<text x="46" y="924.0" class="mono">sounds/&lt;category&gt;/&lt;name&gt;.wav</text>
+<text x="46" y="924.0" class="mono">sounds/&lt;category&gt;/&lt;name&gt;.&lt;ext&gt;</text>
 <path d="M444,920.0 H492" class="arrow"/>
 <rect x="496" y="888" width="594" height="64" rx="8" class="resv"/>
-<text x="512" y="914.0" class="t">Reserved. Plain WAV, found with the same rule.</text>
-<text x="512" y="934.0" class="t">Audio playback arrives after v1; the folder is ready.</text>
+<text x="512" y="914.0" class="t">Reserved. There is no audio code yet; the folder and the</text>
+<text x="512" y="934.0" class="t">same lookup rule are ready for whatever format audio will use.</text>
 <use href="#icon-snd" xlink:href="#icon-snd" x="1040" y="916.0"/>
 <text x="30" y="978" class="h2">3 · FALLBACK CHAIN FOR ONE BLOCK FACE (FIRST HIT WINS)</text>
 <rect x="30" y="994" width="236" height="62" rx="8" class="win"/>

@@ -8,7 +8,9 @@ Linux x86_64, Windows x86_64 and macOS Apple Silicon. A finished build is a few 
 Start the game, then use the menu:
 
 - **New World**: pick a name and a seed (empty = random; numbers are used as-is, other text is hashed).
-- **Load World**: lists every folder in `saves/`; click one to play it. (The right-hand panel is reserved for later.)
+- **Load World**: lists every folder in `saves/`, newest first. Click a world to select it: a slowly rotating 3D view of the 3x3 chunks around where you last stood
+  appears on the right (your chunk in the middle, your edits included, and the player figure where you left off), together with the seed, your last position and
+  how many blocks you changed. Press **Play** (or Enter) to start it.
 - **Game Files**: opens the game folder (`assets/`, `mods/`, `saves/`) in your file manager.
 - **Settings**: render distance, mouse speed, field of view, and every key binding (also reachable from the pause menu).
 
@@ -97,7 +99,7 @@ Everything the game shows is a plain file. See **`docs/asset-mapping.svg`** for 
 - `textures/ui/crosshair.png`, `banner.png`, `font.png` and `textures/sky/sky.png` reskin the UI and sky.
   The font is a 16x6 grid of 8x8 glyphs for ASCII 32 to 127 (the bundled one is Press Start 2P, SIL OFL; see `FONT-LICENSE.txt`).
 - `textures/player/{head,body,arm,leg,eye}.png` re-skin the player model (shown with F4). Parts without a PNG keep their flat color.
-- `textures/{npc,enemy}/` and `sounds/` are reserved with the same rules for when those features land.
+- `textures/{npc,enemy}/` and `sounds/` are reserved with the same lookup rules for when those features land. There is no audio code yet.
 - `assets/config.toml` tunes the world, sky, rendering and player. Every key is optional.
 
 Put mods in `mods/<name>/` using the same folder layout as `assets/`. Files in a mod override files with the same
@@ -114,6 +116,7 @@ ignored (textures come from PNG by name), flat shaded. Models do not hide neighb
 | `src/app.rs` | window, input, screen flow (menu, playing, paused) |
 | `src/menu.rs` | main menu, new-world form, world list |
 | `src/ui.rs` | tiny immediate-mode UI: quads, text from `font.png`, buttons, text fields |
+| `src/preview.rs` | builds the 3D slab shown on the Load World screen |
 | `src/game.rs` | one running world: streaming, camera views, breaking/placing, hotbar, debug screen, console, saving |
 | `src/save.rs` | `saves/` folders, `world.toml`, `edits.bin` |
 | `src/world.rs` | infinite chunks, noise terrain, edits, ray casting |

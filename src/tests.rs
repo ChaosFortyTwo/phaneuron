@@ -14,6 +14,7 @@ use crate::player::{Keys, Player, HEIGHT, SNEAK_HEIGHT};
 use crate::player_model;
 use crate::settings::Settings;
 use winit::keyboard::KeyCode;
+use crate::preview::{self, PreviewInfo, PreviewState};
 use crate::save;
 use crate::ui::{DrawList, Ui};
 use crate::world::{self, World, BLOCK};
@@ -273,17 +274,17 @@ fn new_world_form_takes_typing_and_creates() {
     let mut menu = Menu::New(crate::menu::NewWorld { name: String::new(), seed: String::new(), focus: 0 });
     let dir = std::env::temp_dir();
     let mut input = Input { typed: "Hi there\u{8}\n\u{e9}".into(), ..Input::default() };
-    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings());
+    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings(), &PreviewState::None);
     input.end_frame();
     // Tab moves to the seed field, then type a seed and press Enter
     input.tab = true;
-    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings());
+    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings(), &PreviewState::None);
     input.end_frame();
     input.typed = "777".into();
-    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings());
+    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings(), &PreviewState::None);
     input.end_frame();
     input.enter = true;
-    match menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings()) {
+    match menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings(), &PreviewState::None) {
         Action::Create { name, seed } => {
             assert_eq!(name, "Hi there", "control and non-ASCII characters are filtered out");
             assert_eq!(seed, 777);
@@ -303,7 +304,7 @@ fn menu_navigation_and_button_clicks() {
         ui.mouse = (320.0, y as f32);
         ui.click = true;
         let mut m = Menu::main();
-        m.ui(&mut ui, &Input::default(), &dir, 0.0, &mut settings());
+        m.ui(&mut ui, &Input::default(), &dir, 0.0, &mut settings(), &PreviewState::None);
         if matches!(m, Menu::New(_)) {
             clicked = true;
             menu = m;
@@ -314,7 +315,7 @@ fn menu_navigation_and_button_clicks() {
     assert!(matches!(menu, Menu::New(_)));
     // Esc goes back
     let input = Input { escape: true, ..Input::default() };
-    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings());
+    menu.ui(&mut test_ui(), &input, &dir, 0.0, &mut settings(), &PreviewState::None);
     assert!(matches!(menu, Menu::Main { .. }));
     // the Game Files button yields its action
     let mut found = false;
@@ -323,7 +324,7 @@ fn menu_navigation_and_button_clicks() {
         ui.mouse = (320.0, y as f32);
         ui.click = true;
         let mut m = Menu::main();
-        if matches!(m.ui(&mut ui, &Input::default(), &dir, 0.0, &mut settings()), Action::OpenFiles) {
+        if matches!(m.ui(&mut ui, &Input::default(), &dir, 0.0, &mut settings(), &PreviewState::None), Action::OpenFiles) {
             found = true;
         }
     }
@@ -788,4 +789,154 @@ fn settings_screen_changes_values_and_rebinds_keys() {
     let bad = Input { last_key: Some(KeyCode::Digit1), ..Input::default() };
     screen.ui(&mut test_ui(), &bad, &mut s);
     assert_eq!(s.binds.get(Bind::Sneak), KeyCode::KeyV);
+}
+
+
+// ---------------------------------------------------------------------------
+// v4: Load World preview
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mesh_cut_removes_deep_blocks_and_closes_the_slab() {
+    let (world, atlas, _) = test_world();
+    // chunk (3,3) is on the edge of the loaded 7x7 area, so two of its sides are exposed
+    // (exactly like the outer chunks of the preview's 3x3 area)
+    let key = (3, 3);
+    let top = world.height_at(3 * 16 + 8, 3 * 16 + 8);
+    let y_min = top - 6;
+    let full = mesh::build(&world, &atlas, key);
+    let slab = mesh::build_from(&world, &atlas, key, y_min);
+    assert!(
+        slab.vertices.len() < full.vertices.len() / 2,
+        "the slab has far fewer faces than the full column: {} vs {}",
+        slab.vertices.len(),
+        full.vertices.len()
+    );
+    let lowest = slab.vertices.iter().map(|v| v.pos[1]).fold(f32::MAX, f32::min);
+    assert!((lowest - y_min as f32 * BLOCK).abs() < 1e-3, "nothing below the cut; the floor sits exactly on it: {lowest}");
+    assert!(slab.vertices.iter().filter(|v| (v.pos[1] - y_min as f32 * BLOCK).abs() < 1e-3).count() >= 4, "floor faces exist");
+    // the default build is the same as a cut at 0
+    assert_eq!(mesh::build_from(&world, &atlas, key, 0).vertices.len(), full.vertices.len());
+}
+
+fn saved_world_with_player_at(dir: &std::path::Path, pos: [f32; 3]) -> (save::WorldMeta, Arc<blocks::Registry>, Atlas, Config) {
+    let assets = Assets::with_roots(vec!["assets".into()]);
+    let cfg = Config::load(&assets).unwrap();
+    let (registry, atlas) = blocks::load(&assets, cfg.render.tile_size).unwrap();
+    let registry = Arc::new(registry);
+    let meta = save::create_world(dir, "Preview Test", 777).unwrap();
+    let mut world = World::new(registry.clone(), &cfg.world, 777);
+    let (cx, cz) = crate::game::chunk_of(Vec3::from(pos));
+    world.generate((cx, cz));
+    world.set_block(cx * 16 + 3, world.height_at(cx * 16 + 3, cz * 16 + 3), cz * 16 + 3, 0);
+    let data = save::SaveData {
+        player: save::PlayerSave { x: pos[0], y: pos[1], z: pos[2], yaw: 1.0, pitch: 0.0 },
+        selected_block: "grass".into(),
+    };
+    save::save_world(&meta, &data, world.edits(), &registry, true).unwrap();
+    (meta, registry, atlas, cfg)
+}
+
+#[test]
+fn preview_covers_three_by_three_chunks_around_the_player() {
+    let dir = std::env::temp_dir().join(format!("ph_prev_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let pos = [200.0, 40.0, -100.0];
+    let (meta, registry, atlas, cfg) = saved_world_with_player_at(&dir, pos);
+
+    let built = preview::build(&registry, &atlas, &cfg, &meta).unwrap();
+    assert_eq!(built.meshes.len(), 10, "9 terrain chunks + the player figure");
+    assert_eq!(built.info.edited_blocks, 1, "the saved edit is counted");
+    assert!((built.info.pos - Vec3::from(pos)).length() < 1e-4);
+
+    // player at x=200 -> block 400 -> chunk 25; z=-100 -> block -200 -> chunk -13
+    let (cx, cz) = (25, -13);
+    let chunk_units = 16.0 * BLOCK;
+    let (xmin, xmax) = ((cx - 1) as f32 * chunk_units, (cx + 2) as f32 * chunk_units);
+    let (zmin, zmax) = ((cz - 1) as f32 * chunk_units, (cz + 2) as f32 * chunk_units);
+    for m in &built.meshes[..9] {
+        assert!(!m.indices.is_empty() && m.indices.iter().all(|&i| (i as usize) < m.vertices.len()));
+        for v in &m.vertices {
+            assert!(v.pos[0] >= xmin - 1e-3 && v.pos[0] <= xmax + 1e-3, "x {} outside {xmin}..{xmax}", v.pos[0]);
+            assert!(v.pos[2] >= zmin - 1e-3 && v.pos[2] <= zmax + 1e-3, "z {} outside {zmin}..{zmax}", v.pos[2]);
+        }
+    }
+    // all nine chunks are present: vertices reach every corner region
+    let all: Vec<_> = built.meshes[..9].iter().flat_map(|m| m.vertices.iter()).collect();
+    assert!(all.iter().any(|v| v.pos[0] < xmin + 0.1) && all.iter().any(|v| v.pos[0] > xmax - 0.1));
+    assert!(all.iter().any(|v| v.pos[2] < zmin + 0.1) && all.iter().any(|v| v.pos[2] > zmax - 0.1));
+
+    // the figure stands where the player was, and the camera aims at the middle chunk
+    let fig = &built.meshes[9];
+    let c: Vec3 = fig.vertices.iter().map(|v| Vec3::from(v.pos)).sum::<Vec3>() / fig.vertices.len() as f32;
+    assert!((c.x - pos[0]).abs() < 0.6 && (c.z - pos[2]).abs() < 0.6 && c.y > pos[1], "figure at the player: {c:?}");
+    assert!((built.target.x - (xmin + xmax) / 2.0).abs() < 1e-3 && (built.target.z - (zmin + zmax) / 2.0).abs() < 1e-3);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preview_of_a_never_played_world_uses_the_spawn_and_broken_saves_fail_cleanly() {
+    let dir = std::env::temp_dir().join(format!("ph_prev2_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let assets = Assets::with_roots(vec!["assets".into()]);
+    let cfg = Config::load(&assets).unwrap();
+    let (registry, atlas) = blocks::load(&assets, cfg.render.tile_size).unwrap();
+    let registry = Arc::new(registry);
+
+    let fresh = save::create_world(&dir, "Fresh", 5).unwrap();
+    let built = preview::build(&registry, &atlas, &cfg, &fresh).unwrap();
+    assert_eq!(built.meshes.len(), 10);
+    assert_eq!(built.info.edited_blocks, 0);
+    assert!(built.info.pos.x.abs() < 1.0 && built.info.pos.z.abs() < 1.0, "spawn is near the origin");
+
+    let broken = save::create_world(&dir, "Broken", 5).unwrap();
+    std::fs::write(broken.folder.join("edits.bin"), b"garbage").unwrap();
+    assert!(preview::build(&registry, &atlas, &cfg, &broken).is_err(), "a corrupt save reports an error instead of crashing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_screen_select_then_play() {
+    let dir = std::env::temp_dir();
+    let meta = |name: &str, seed| save::WorldMeta { folder: std::env::temp_dir().join(name), name: name.into(), seed, last_played: 0 };
+    let (a, b) = (meta("alpha", 1), meta("beta", 2));
+    let mut menu = Menu::Load { worlds: vec![a.clone(), b.clone()], scroll: 0.0, selected: None };
+
+    // geometry on a 640x360 logical screen (see menu.rs)
+    let list_w = (640.0_f32 * 0.36).clamp(180.0, 280.0);
+    let (right_x, right_w, panel_h) = (16.0 + list_w + 12.0, 640.0 - (16.0 + list_w + 12.0) - 16.0, 360.0 - 44.0 - 44.0);
+    let play = (right_x + right_w / 2.0, 44.0 + panel_h - 30.0 + 11.0);
+    let click = |x: f32, y: f32| {
+        let mut ui = test_ui();
+        ui.mouse = (x, y);
+        ui.click = true;
+        ui
+    };
+
+    // clicking the Play position with nothing selected does nothing
+    assert!(matches!(menu.ui(&mut click(play.0, play.1), &Input::default(), &dir, 0.0, &mut settings(), &PreviewState::None), Action::None));
+
+    // click the second entry: selected, and the app is asked for its preview
+    match menu.ui(&mut click(60.0, 48.0 + 26.0 + 6.0), &Input::default(), &dir, 0.0, &mut settings(), &PreviewState::None) {
+        Action::Select(m) => assert_eq!(m.name, "beta"),
+        _ => panic!("clicking a world selects it"),
+    }
+    if let Menu::Load { selected, .. } = &menu {
+        assert_eq!(*selected, Some(1));
+    }
+
+    // with the preview ready, the Play button starts that world
+    let ready = PreviewState::Ready(PreviewInfo { folder: b.folder.clone(), pos: Vec3::ZERO, edited_blocks: 0 });
+    match menu.ui(&mut click(play.0, play.1), &Input::default(), &dir, 0.0, &mut settings(), &ready) {
+        Action::Load(m) => assert_eq!(m.name, "beta"),
+        _ => panic!("Play loads the selected world"),
+    }
+    // Enter does the same, Esc goes back to the main menu
+    let enter = Input { enter: true, ..Input::default() };
+    assert!(matches!(menu.ui(&mut test_ui(), &enter, &dir, 0.0, &mut settings(), &ready), Action::Load(_)));
+    let esc = Input { escape: true, ..Input::default() };
+    menu.ui(&mut test_ui(), &esc, &dir, 0.0, &mut settings(), &ready);
+    assert!(matches!(menu, Menu::Main { .. }));
 }
